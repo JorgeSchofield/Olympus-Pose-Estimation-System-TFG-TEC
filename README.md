@@ -25,7 +25,6 @@ Space Systems Laboratory (SETEC Lab) — ELANaV project.
 - [System Architecture](#system-architecture)
 - [Repository Structure](#repository-structure)
 - [Objectives and Indicators](#objectives-and-indicators)
-- [Status](#status)
 - [Known Limitations](#known-limitations)
 - [Documentation](#documentation)
 - [Related Work](#related-work)
@@ -116,24 +115,6 @@ The MATLAB/Simulink reference model lives in a separate repository — see
 | Design the multi-agent application | ≥ 4 agents; ≥ 99 % message delivery | In design |
 | Integrate the subsystem on the rover | ≥ 15 min continuous; < 100 ms end-to-end latency | Pending |
 | Evaluate performance | Position error ≤ 3 % of distance travelled | Pending |
-
----
-
-## Status
-
-Week 4 of 16. The requirements document, the simulation reference model and the first
-two chapters of the manuscript are complete. Design of the multi-agent application is
-under way.
-
-Two open items should be read before any result in this repository:
-
-- **Kinematic parameters are not characterized.** Ticks per revolution, wheel radii and
-  effective track width are provisional, and the figures available from the previous
-  test campaign are mutually inconsistent by two orders of magnitude. Simulation results
-  demonstrate that the algorithm works; they do **not** demonstrate that the platform
-  meets the accuracy target.
-- **Measurements are blocked** until the section of the rover damaged in an accident is
-  repaired.
 
 ---
 
