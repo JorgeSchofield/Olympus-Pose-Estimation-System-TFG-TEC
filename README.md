@@ -99,7 +99,8 @@ construction.
 document/       Thesis manuscript (LaTeX)
 requirements/   Technical requirements (DRT-SEP-001) and Channel 2 ICD
 firmware/       Low-level controller extension (Rust, no_std)
-agents/         Multi-agent application and CMAES portability layer
+agents/         Multi-agent application
+CMAES port/     CMAES portability layer
 ```
 
 The MATLAB/Simulink reference model lives in a separate repository — see
