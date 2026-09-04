@@ -1,0 +1,2 @@
+add_executable(cmaes_sender_receiver_demo Main.c)
+target_link_libraries(cmaes_sender_receiver_demo PRIVATE cmaes_pthreads)
