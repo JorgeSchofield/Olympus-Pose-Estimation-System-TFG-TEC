@@ -55,6 +55,7 @@ void read_wrapper(void* pvParameters) {
 
 //Main
 int main(void) {
+	setvbuf(stdout, NULL, _IOLBF, 0);
 	printf("------Sender Receiver APP (pthreads backend)------ \n");
 	//Constructors for each initialized class
 

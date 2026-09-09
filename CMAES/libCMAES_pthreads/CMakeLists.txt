@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(cmaes_pthreads C)
+include(GNUInstallDirs)
+install(TARGETS cmaes_pthreads ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(FILES include/CMAES.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cmaes)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)

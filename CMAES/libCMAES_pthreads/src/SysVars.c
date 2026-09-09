@@ -12,7 +12,7 @@ MAESAgent* get_taskEnvFunction(sysVars* Vars, Agent_AID aid) {
 	MAESUBaseType_t i = 0;
 	while (i < AGENT_LIST_SIZE)
 	{
-		if (Vars->environment[i].first == aid && aid!=NULL)
+		if (Vars->environment[i].first == aid && aid!=(Agent_AID)0)
 		{
 			return Vars->environment[i].second;
 		}
@@ -29,7 +29,7 @@ void set_TaskEnvFunction(sysVars* Vars, Agent_AID aid, MAESAgent* agent_ptr) {
 	MAESUBaseType_t i = 0;
 	while (i < AGENT_LIST_SIZE)
 	{
-		if (Vars->environment[i].first == NULL)
+		if (Vars->environment[i].first == (Agent_AID)0)
 		{
 			Vars->environment[i].first = aid;
 			Vars->environment[i].second = agent_ptr;
@@ -48,7 +48,7 @@ void erase_TaskEnvFunction(sysVars* Vars, Agent_AID aid) {
 	{
 		if (Vars->environment[i].first == aid)
 		{
-			Vars->environment[i].first = NULL;
+			Vars->environment[i].first = (Agent_AID)0;
 			Vars->environment[i].second = NULL;
 
 			while (i < AGENT_LIST_SIZE - 1)

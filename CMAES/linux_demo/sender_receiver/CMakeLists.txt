@@ -1,2 +1,3 @@
 add_executable(cmaes_sender_receiver_demo Main.c)
 target_link_libraries(cmaes_sender_receiver_demo PRIVATE cmaes_pthreads)
+install(TARGETS cmaes_sender_receiver_demo RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

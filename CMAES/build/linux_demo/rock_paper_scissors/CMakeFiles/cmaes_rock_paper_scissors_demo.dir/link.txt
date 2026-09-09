@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/cmaes_rock_paper_scissors_demo.dir/Main.c.o -o cmaes_rock_paper_scissors_demo  ../../libCMAES_pthreads/libcmaes_pthreads.a 

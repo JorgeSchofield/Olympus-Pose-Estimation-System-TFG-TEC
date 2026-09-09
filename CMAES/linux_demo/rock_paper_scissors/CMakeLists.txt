@@ -1,2 +1,3 @@
 add_executable(cmaes_rock_paper_scissors_demo Main.c)
 target_link_libraries(cmaes_rock_paper_scissors_demo PRIVATE cmaes_pthreads)
+install(TARGETS cmaes_rock_paper_scissors_demo RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

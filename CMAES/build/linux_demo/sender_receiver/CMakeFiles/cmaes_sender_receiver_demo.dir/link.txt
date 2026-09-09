@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/cmaes_sender_receiver_demo.dir/Main.c.o -o cmaes_sender_receiver_demo  ../../libCMAES_pthreads/libcmaes_pthreads.a 
