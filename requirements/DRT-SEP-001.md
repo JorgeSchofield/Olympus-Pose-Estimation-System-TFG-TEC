@@ -1,15 +1,21 @@
-# DRT-SEP-001 — Documento de Requerimientos Técnicos
+# DRT-SEP-001: Documento de Requerimientos Técnicos
 ## Subsistema de Estimación de Pose (SEP) del róver Olympus
 
 | Campo | Valor |
 |---|---|
 | Identificador | DRT-SEP-001 |
-| Versión | v0.2 (borrador) |
-| Entregable | Semana 3 — «Documento de requerimientos técnicos» (Cuadro 1.2, anteproyecto) |
-| Proyecto | TFG — Ingeniería Electrónica, ITCR / SETEC Lab |
-| Marco | Proyecto ELANaV — plataforma róver Olympus |
-| Documentos padre | SRS Olympus v0.1; ICD-LLC-001 v1.3; Anteproyecto TFG |
-| Norma de referencia | IEEE 29148 (estructura); ECSS-E-ST-10-02C (métodos V&V: T/A/D/I) |
+| Versión | v0.3 (borrador) |
+| Entregable | Semana 3: «Documento de requerimientos técnicos» (cuadro de entregables del informe) |
+| Proyecto | TFG, Ingeniería Electrónica, ITCR / SETEC Lab |
+| Marco | Proyecto ELANaV, plataforma róver Olympus |
+| Documentos padre | SRS Olympus v0.1; ICD-LLC-001 v1.3; anteproyecto del TFG y observaciones de los profesores asesores |
+| Documentos hermanos | ICD-PE-002 v2.0 (canal de sensores); modelo de simulación de referencia v2.0 |
+| Norma de referencia | IEEE 29148 (estructura); ECSS-E-ST-10-02C (métodos de verificación T/A/D/I) |
+
+> **Fuente de verdad.** Cuando este documento y el modelo de simulación v2.0 no coincidan,
+> prevalece el modelo. Los valores numéricos de parámetros viven en `sep_geo_params.m`,
+> `sep_ekf_params.m`, `llc_params.m` y `sim_params.m`, con su etiqueta de procedencia
+> (`MED`, `DER`, `PROV`, `TBD`). Este documento los cita, no los duplica como autoridad.
 
 ---
 
@@ -17,34 +23,49 @@
 
 Este documento especifica los requerimientos técnicos verificables del **Subsistema de
 Estimación de Pose (SEP)**: el conjunto de firmware, agentes de software y sensores que
-producen una estimación continua de la pose planar $\mathbf{x} = [x,\ y,\ \theta]^{\top}$ del
-róver Olympus mediante fusión de odometría de seis ruedas e IMU bajo el paradigma de
-sistemas multiagente.
+producen una estimación continua de la pose planar del róver Olympus mediante la fusión de
+la odometría de seis ruedas con el giroscopio de una IMU, bajo el paradigma de sistemas
+multiagente.
 
-**Está dentro del alcance**: la adquisición de encoders e IMU en el LLC, su transporte al
-HLC, la aplicación multiagente sobre CMAES adaptada a Linux, el algoritmo de fusión (EKF),
-la integración del receptor GPS como referencia de validación, y la evaluación cuantitativa
-de precisión.
+**Está dentro del alcance:** la interfaz eléctrica de la IMU con el LLC; la adquisición de
+encoders e IMU en el LLC y su transporte al HLC; la adaptación de CMAES a Linux; la
+aplicación multiagente; el estimador (EKF de cinco estados); la integración del receptor
+GPS como referencia complementaria de validación; y la evaluación cuantitativa de
+precisión.
 
-**Está fuera del alcance**: la planificación de trayectoria, el control de lazo cerrado de
-velocidad por rueda, la navegación visual, y cualquier modificación funcional de la pila de
-software que el róver ya ejecuta en producción.
+**Está fuera del alcance:** la planificación de trayectoria, el control de velocidad por
+rueda, la navegación visual, la estimación en seis grados de libertad, la compensación de
+inclinación del giroscopio y cualquier modificación funcional de la pila de software que el
+róver ya ejecuta en producción.
 
 ### 1.1 Relación con el SRS de Olympus
 
-El SEP **no redefine** requisitos del sistema Olympus: los deriva. Concretamente, cierra dos
-requisitos que la campaña TRL-4 dejó abiertos:
+El SEP **no redefine** requisitos del sistema Olympus: los deriva. Cierra dos requisitos que
+la campaña TRL-4 dejó abiertos:
 
 | Requisito Olympus | Estado TRL-4 | Cómo lo cierra el SEP |
 |---|---|---|
-| `RF-004-R1` — compensación de deslizamiento por fusión odometría–IMU (EKF) | PENDIENTE | `PE-RF-007`, `PE-RF-008` |
-| `RNF-003` — precisión de navegación | PENDIENTE | `PE-RNF-004` |
+| `RF-004-R1`: compensación de deslizamiento por fusión odometría-IMU (EKF) | Pendiente | `PE-RF-007`, `PE-RF-008` |
+| `RNF-003`: precisión de navegación (error < 5 % de la distancia) | Pendiente | `PE-RNF-004` |
 
-**Nota de consistencia.** `RNF-003` fija el umbral en «error < 5 % de la distancia total»,
-mientras que el indicador de la meta del anteproyecto exige **≤ 3 %**. El SEP adopta el
-criterio más estricto (3 %); el cumplimiento de `PE-RNF-004` implica por construcción el de
-`RNF-003`. Esta decisión debe reflejarse en la próxima revisión del SRS de Olympus para
-evitar dos umbrales en circulación.
+**Nota de consistencia.** El SEP adopta un criterio más estricto que `RNF-003`: error de
+posición final ≤ 3 % de la distancia recorrida. Cumplir `PE-RNF-004` en un escenario implica
+cumplir `RNF-003` en ese escenario, con 2 puntos porcentuales de margen.
+
+### 1.2 Cambios respecto a v0.2
+
+| Tema | v0.2 | v0.3 |
+|---|---|---|
+| Vector de estado | $[x,\ y,\ \theta]^\top$ | $[p_x,\ p_y,\ \theta,\ \omega,\ b_\omega]^\top$ |
+| Canal de sensores | Canal 2 binario de 50 B sobre un USART libre | Trama RAW ASCII del firmware v2.20 sobre USART0 → USB (vigente) y trama binaria SENSOR de 55 B con CRC (objetivo). Ver ICD-PE-002 v2.0 |
+| Encoders | Seis acumuladores | Dos acumuladores, la suma de las tres ruedas de cada lado |
+| Adaptación ante deslizamiento | Sobre $R$ (ruido de medición) | Sobre $Q$ (ruido de proceso de la odometría) |
+| Sesgo del giroscopio | No considerado | Estado del filtro, observable solo en reposo (ZARU) |
+| Buzones CMAES | Paso de punteros | Profundidad 1, envío con tiempo límite cero en la ruta de sensores y rotación de al menos tres búferes |
+| Entrega de mensajes | ≥ 99 % sobre 10⁵ mensajes | ≥ 99 % y ≤ 4 pérdidas seguidas en una prueba de 15 min a 50 Hz |
+| Verdad de terreno | GPS en exteriores, cinta en interiores | Marcadores medidos con cinta (≤ 1 cm) como referencia principal; GPS complementario |
+| Objetivos específicos | Cuatro | Seis (se agregan la interfaz eléctrica y la adaptación de CMAES) |
+| Reloj del LLC | Lazo determinista de 20 ms | El modelo predice que el lazo real dura más de 20 ms; **hipótesis pendiente de verificar** (Anexo C, `R-02`) |
 
 ---
 
@@ -54,44 +75,27 @@ evitar dos umbrales en circulación.
 
 | Nodo | Plataforma | Rol en el SEP |
 |---|---|---|
-| LLC | ATmega2560, Rust `no_std`, lazo determinista de 20 ms | Adquiere 6 encoders en cuadratura e IMU; emite trama de sensores |
-| HLC | Raspberry Pi 5 (8 GB), Linux Yocto | Ejecuta la aplicación multiagente CMAES; integra el GPS; estima la pose |
+| LLC | ATmega2560, Rust `no_std`, firmware v2.20, lazo nominal de 20 ms | Adquiere los seis encoders (decodificación ×2) y la IMU; suma las cuentas por lado; emite la trama de sensores |
+| HLC | Raspberry Pi 5 (8 GB), Linux Yocto | Ejecuta la aplicación multiagente CMAES; integra el GPS; estima y publica la pose |
 
 ### 2.2 Interfaces externas
 
 | ID | Interfaz | Descripción | Dirección |
 |---|---|---|---|
-| `IF-01` | Canal 1 — ICD-LLC-001 v1.3 | Telemetría ASCII de 26 campos a ~1 Hz y comandos con semántica ACK/ERR. **Preexistente; el SEP no lo modifica.** | LLC ↔ HLC |
-| `IF-02` | Canal 2 — ICD-PE-002 (documento independiente) | Trama binaria de sensores a 50 Hz sobre el USART libre del ATmega2560, con adaptador USB-TTL a un puerto USB dedicado de la RPi5. | LLC → HLC |
-| `IF-03` | GPS GY-GPSV3-NEO | NMEA sobre UART/USB al HLC. **Exclusivamente verdad de terreno.** | GPS → HLC |
-| `IF-04` | MPU-9250 | I²C por software (D42/PL7 = SDA, D43/PL6 = SCL), dirección 0x68, ~100 kHz. | IMU → LLC |
-| `IF-05` | Bus de mensajería CMAES | Buzones de agentes con paso de punteros. | interno HLC |
+| `IF-01` | Telemetría heredada (ICD-LLC-001 v1.3) | TLM ASCII extendida de 26 campos, una vez cada 50 ciclos del LLC, y comandos con semántica ACK/ERR. **Preexistente; el SEP no la modifica.** | LLC ↔ HLC |
+| `IF-02` | Canal de sensores (ICD-PE-002 v2.0) | Trama de sensores una vez por ciclo del LLC sobre el mismo enlace USART0 → USB a 115 200 baud. Formato vigente: RAW ASCII. Formato objetivo: SENSOR binaria con CRC. | LLC → HLC |
+| `IF-03` | GPS GY-GPSV3-NEO | NMEA sobre UART o USB al HLC. **Nunca entra al filtro.** | GPS → HLC |
+| `IF-04` | MPU-9250 | I²C por software (D42 = SDA, D43 = SCL), dirección 0x68, ≈ 100 kHz, a través de un traductor de niveles 5 V / 3,3 V. Giroscopio ±250 °/s (131 LSB/(°/s)); acelerómetro ±2 g (16 384 LSB/g). | IMU → LLC |
+| `IF-05` | Bus de mensajería CMAES | Buzones de profundidad 1 con paso de punteros. | Interno HLC |
 | `IF-06` | Publicación de pose | Salida del agente de comunicación hacia el sistema de navegación existente y hacia el registro de validación. | HLC → externo |
 
-### 2.3 Justificación del Canal 2
+### 2.3 Por qué la trama de sensores comparte el enlace USART0
 
-El mapa de USART del ATmega2560 no admite un tercer periférico serie nuevo:
-
-| USART | Asignación | Disponibilidad |
-|---|---|---|
-| USART0 | Enlace RPi5 por USB (configuración actual) | Ocupado |
-| USART1 | D18/D19 coinciden con INT2/INT3 (encoders CR/CL) | Bloqueado de forma permanente |
-| USART2 | TF02 LiDAR (D17/RX2) | Ocupado |
-| USART3 | D14/D15 — reservado en el código para la RPi5, sin usar hoy | **Libre** |
-
-Exactamente uno de USART0/USART3 queda libre en cualquiera de las dos configuraciones
-posibles del enlace heredado. El SEP toma el que quede libre. Se descartaron dos
-alternativas:
-
-- **Elevar la cadencia de la trama ASCII de `IF-01` a 50 Hz** (`TLM_PERIOD: 50 → 1`): rompe a
-  todo consumidor que asume 1 Hz y el formateo de 26 campos de texto 50 veces por segundo en
-  un AVR a 16 MHz es un costo injustificable dentro de un ciclo de 20 ms.
-- **Multiplexar un prefijo nuevo sobre el mismo puerto**: obliga a que `olympus_hlc`
-  demultiplexe y reenvíe, lo que exige modificar software en producción.
-
-Ambas violan `PE-RNF-006` (no interferencia). El canal físico separado cuesta un adaptador
-USB-TTL (≈ US$ 4, dentro del margen de imprevistos del presupuesto) y deja el sistema
-heredado intacto por construcción.
+El firmware v2.20 ya emite la trama `RAW:` en cada ciclo por el mismo enlace que la
+telemetría heredada, con un prefijo que la distingue de la TLM. Usarla no exige cambiar el
+software en producción, que solo consume las líneas de TLM. La versión v0.2 proponía un
+canal físico separado sobre USART3 con un adaptador USB-serial; esa opción queda como
+alternativa si la carga del enlace USART0 resulta insuficiente (ICD-PE-002 v2.0, §5).
 
 ---
 
@@ -99,18 +103,21 @@ heredado intacto por construcción.
 
 Métodos de verificación: **T** = prueba, **A** = análisis, **D** = demostración, **I** = inspección.
 
-| ID | Requerimiento | Criterio de aceptación | V&V | Obj. |
+| ID | Requerimiento | Criterio de aceptación | V&V | OE |
 |---|---|---|---|---|
-| `PE-RF-001` | El LLC adquiere las cuentas de los seis encoders en cuadratura y las lecturas de acelerómetro y giroscopio del MPU-9250 dentro de cada ciclo de control de 20 ms. | Las seis cuentas y los seis ejes inerciales aparecen en la trama de `IF-02` con marca de tiempo del LLC; ninguna muestra se repite ni se omite en 1000 ciclos consecutivos. | T | 1 |
-| `PE-RF-002` | El LLC transmite la trama de sensores por `IF-02` con una tasa de muestreo ≥ 50 Hz. | Medición en el HLC sobre 10 min: intervalo entre `seq` consecutivos ≤ 20 ms en el p99. | T | 1 |
-| `PE-RF-003` | El HLC integra el receptor GPS y obtiene coordenadas válidas con refresco ≥ 1 Hz en pruebas exteriores. | Registro de ≥ 300 s con fix válido y cadencia ≥ 1 Hz. | T | 1 |
-| `PE-RF-004` | La aplicación del HLC se compone de al menos cuatro agentes CMAES funcionales: adquisición, fusión de datos, estimación y comunicación. | Los cuatro agentes se registran en la plataforma y aparecen en la traza de ejecución intercambiando mensajes. | D | 2 |
-| `PE-RF-005` | Los agentes intercambian mensajes mediante el bus de CMAES usando estructuras binarias de tamaño fijo con esquema de múltiples buffers. | Prueba unitaria de mensajería: ningún mensaje entregado presenta contenido sobrescrito por el productor. | T | 2 |
-| `PE-RF-006` | El agente de fusión convierte cuentas de encoder en velocidad lineal y angular del cuerpo mediante el modelo cinemático skid-steer de seis ruedas reducido a diferencial equivalente. | Comparación contra el modelo Simulink de referencia sobre entradas sintéticas; discrepancia ≤ 1 % en $v$ y $\omega$. | A/T | 2 |
-| `PE-RF-007` | El agente de estimación mantiene un EKF con predicción por odometría y corrección por giroscopio, conservando $\mathbf{x}$ y $P$ como estado persistente entre ciclos. | Convergencia del filtro sobre trayectoria sintética; $P$ acotada y definida positiva durante toda la ejecución. | A/T | 2, 3 |
-| `PE-RF-008` | El SEP detecta deslizamiento por discrepancia entre la velocidad angular derivada de encoders y la medida por el giroscopio, y adapta la matriz $R$ en consecuencia. | Ensayo con una rueda elevada o sobre superficie de bajo agarre: el indicador de deslizamiento se activa y la traza de $R$ aumenta de forma correlacionada. | T | 2 |
-| `PE-RF-009` | El agente de comunicación publica la pose estimada hacia el sistema de navegación existente. | La pose es legible por un consumidor externo en el formato acordado, sin interferir con `IF-01`. | D | 3 |
-| `PE-RF-010` | El SEP registra pose estimada y referencia GPS con marcas de tiempo comunes para el análisis offline de la Fase 5. | Archivo de registro con ambas series alineadas temporalmente y desfase de reloj acotado y documentado. | T | 4 |
+| `PE-RF-001` | La IMU se conecta al LLC mediante una interfaz eléctrica que respeta los umbrales de entrada de ambos extremos. | Niveles alto y bajo del bus I²C dentro de los márgenes de ruido de la especificación I²C (0,2 V_DD alto, 0,1 V_DD bajo); tiempo de subida < 1000 ns; 45 000 lecturas seguidas a 50 Hz sin errores. | T | 1 |
+| `PE-RF-002` | El LLC adquiere las cuentas de los seis encoders y la ráfaga de 14 B del MPU-9250 en cada ciclo, y transmite por `IF-02` la suma de cuentas de cada lado, el giroscopio, el acelerómetro y la marca de tiempo. | Todos los campos aparecen en cada trama; ninguna muestra se repite ni se omite en 1000 ciclos consecutivos. | T | 2 |
+| `PE-RF-003` | La trama de sensores llega al HLC con una cadencia ≥ 50 Hz. | Medición **con el reloj del HLC** sobre 10 min: intervalo entre tramas consecutivas ≤ 20 ms en el p99. La marca de tiempo del LLC no se usa para esta verificación (ver `R-02`). | T | 2 |
+| `PE-RF-004` | El HLC integra el receptor GPS y obtiene coordenadas válidas con refresco ≥ 1 Hz en pruebas exteriores. | Registro de ≥ 300 s con fix válido y cadencia ≥ 1 Hz. | T | 2 |
+| `PE-RF-005` | La biblioteca CMAES funciona sobre el Linux del HLC con la misma interfaz pública que la versión para FreeRTOS. | Compilación en la RPi5 con `-std=c99 -Wall -Wextra` sin advertencias nuevas respecto a la versión original; una versión del ejemplo piedra-papel-tijera a 50 Hz procesa ≥ 45 000 mensajes con registro, suspensión y reanudación, sin fallos ni crecimiento de memoria. | T | 3 |
+| `PE-RF-006` | La aplicación del HLC se compone de al menos cuatro agentes CMAES: adquisición, fusión de datos, estimación y comunicación. | Los cuatro agentes se registran en la plataforma y aparecen en la traza intercambiando mensajes. | D | 4 |
+| `PE-RF-007` | Los agentes intercambian estructuras binarias de tamaño fijo. Cada productor usa una rotación de al menos tres búferes, y en la ruta de sensores envía con tiempo límite cero. | Prueba unitaria: ningún mensaje entregado presenta contenido sobrescrito por el productor; ningún productor de la ruta de sensores se bloquea. | T | 4 |
+| `PE-RF-008` | El agente de adquisición deposita en el buzón los **acumuladores sin convertir**; las diferencias se calculan en el agente que las consume, contra el último valor que él mismo procesó. | Con pérdida de tramas inyectada, la distancia integrada no presenta error permanente atribuible a mensajes perdidos (prueba del modelo, caso 10). | T/A | 4 |
+| `PE-RF-009` | El agente de fusión convierte los acumuladores por lado en $\Delta s$, $\Delta\theta_{enc}$ y $\omega_{enc}$ con el modelo diferencial equivalente ($b_{nom}$ = promedio de los tres ejes; $b_{eff} = \chi\, b_{nom}$), y detecta el reposo cuando ningún lado registra cuentas. | Comparación contra `sep_odometry` sobre entradas sintéticas; discrepancia ≤ 1 % en $\Delta s$ y $\Delta\theta$. | A/T | 4 |
+| `PE-RF-010` | El agente de estimación mantiene un EKF de cinco estados $[p_x,\ p_y,\ \theta,\ \omega,\ b_\omega]$, con predicción por odometría, corrección por giroscopio en forma de Joseph y ZARU en reposo; el sesgo solo se actualiza en reposo. | Equivalencia con `sep_ekf_step` sobre trayectorias sintéticas; $P$ simétrica y definida positiva durante toda la ejecución; NEES del bloque de posición consistente. | A/T | 4 |
+| `PE-RF-011` | El SEP detecta deslizamiento por la discrepancia $\delta = \lvert\omega_m - \hat b_\omega - \omega_{enc}\rvert$ y, cuando supera $\delta_{th}$, **aumenta el ruido de proceso** de la velocidad angular de la odometría ($Q_{44}$) con el factor $\gamma$. | Ensayo con deslizamiento de un lado: $\gamma > 1$ mientras dura el deslizamiento; $\gamma = 1$ sin deslizamiento. | T | 4 |
+| `PE-RF-012` | El agente de comunicación publica la pose hacia el sistema de navegación existente. | La pose es legible por un consumidor externo en el formato acordado, sin interferir con `IF-01`. | D | 5 |
+| `PE-RF-013` | El SEP registra la pose estimada y la referencia GPS con marcas de tiempo del HLC para el análisis posterior. | Archivo de registro con ambas series alineadas temporalmente. | T | 6 |
 
 ---
 
@@ -118,15 +125,15 @@ Métodos de verificación: **T** = prueba, **A** = análisis, **D** = demostraci
 
 | ID | Requerimiento | Criterio de aceptación | V&V | Prioridad |
 |---|---|---|---|---|
-| `PE-RNF-001` | El SEP entrega estimaciones de pose con frecuencia de actualización ≥ 10 Hz. | Intervalo entre publicaciones ≤ 100 ms en el p95 durante ≥ 15 min. | T | Crítica |
-| `PE-RNF-002` | La latencia extremo a extremo, desde la lectura del sensor en el LLC hasta la publicación de la pose en el HLC, es < 100 ms. | Medición por marca de tiempo propagada (§ 6.1); p95 < 100 ms sostenido ≥ 15 min. | T | Crítica |
-| `PE-RNF-003` | La tasa de entrega de mensajes entre agentes es ≥ 99 %. | Conteo por número de secuencia sobre ≥ 10⁵ mensajes: pérdidas ≤ 1 %. | T | Crítica |
-| `PE-RNF-004` | El error de estimación de posición es ≤ 3 % de la distancia recorrida frente a la verdad de terreno, y ≤ 3 % frente al modelo de simulación. | Protocolo UMBmark adaptado (Anexo B) en ≥ 3 escenarios: recta, giro en el lugar y trayectoria compuesta. | T/A | Crítica |
-| `PE-RNF-005` | El SEP opera de forma continua ≥ 15 min sin fallo, degradación de cadencia ni fuga de memoria. | Ejecución supervisada de 15 min: sin reinicios de agente, RSS estable. | T | Alta |
-| `PE-RNF-006` | El SEP no altera el comportamiento funcional de la pila de software en producción del róver. | `IF-01` conserva su formato de 26 campos y su cadencia; `olympus_hlc` no requiere modificación de código; el lazo del LLC conserva su periodo de 20 ms. | I/T | **Crítica** |
-| `PE-RNF-007` | El código del HLC es portable a C embebido: C99, sin asignación dinámica después de la inicialización, sin dependencias específicas de Linux fuera de la capa de portabilidad. | Inspección de código; compilación de los módulos de fusión y estimación con `-std=c99 -Wall -Wextra` sin advertencias. | I/A | Alta |
-| `PE-RNF-008` | El tiempo de cómputo añadido al ciclo del LLC por la lectura del IMU y la emisión de la trama de `IF-02` no supera el 25 % del periodo de 20 ms. | Medición con pin de traza o contador de ciclos: ≤ 5 ms por ciclo. | T | Alta |
-| `PE-RNF-009` | El SEP degrada de forma segura ante pérdida de una fuente: si el IMU deja de responder, el filtro continúa en modo solo-odometría con incertidumbre creciente y lo señaliza. | Desconexión física del IMU en caliente: el sistema no se detiene y marca el estado degradado. | T | Media |
+| `PE-RNF-001` | El SEP entrega estimaciones de pose con frecuencia ≥ 10 Hz. | Intervalo entre publicaciones ≤ 100 ms en el p95 durante ≥ 15 min. | T | Crítica |
+| `PE-RNF-002` | La latencia de extremo a extremo, desde la lectura en el LLC hasta la publicación en el HLC, es < 100 ms. | Medición con marca de tiempo propagada (§ 6.1); p95 < 100 ms sostenido ≥ 15 min. | T | Crítica |
+| `PE-RNF-003` | La entrega de mensajes entre agentes es ≥ 99 %, sin más de cuatro pérdidas seguidas. | Conteo por número de secuencia en una prueba de 15 min a 50 Hz (45 000 mensajes). Cuatro pérdidas seguidas a 50 Hz equivalen a 100 ms sin actualización. | T | Crítica |
+| `PE-RNF-004` | El error de posición final es ≤ 3 % de la distancia recorrida frente a la verdad de terreno y frente al modelo de simulación. En el giro en el lugar, el error de rumbo final es ≤ 3 % del giro total. | Anexo B.3: recta de 5 m, giro de 360° y UMBmark de 2 m por lado, medidos contra marcadores con incertidumbre ≤ 1 cm. | T/A | Crítica |
+| `PE-RNF-005` | El SEP opera ≥ 15 min sin fallo, degradación de cadencia ni fuga de memoria. | Ejecución supervisada: sin reinicios de agente, memoria residente estable. | T | Alta |
+| `PE-RNF-006` | El SEP no altera el comportamiento funcional de la pila de software en producción. | `IF-01` conserva formato y cadencia; `olympus_hlc` no requiere cambios; los cambios al firmware del LLC se limitan a lo que el SEP necesite y no cambian lo que la TLM entrega. | I/T | Crítica |
+| `PE-RNF-007` | El código del HLC es portable a C embebido: C99, sin memoria dinámica después de la inicialización, sin dependencias de Linux fuera de la capa de portabilidad de CMAES. | Inspección; compilación de fusión y estimación con `-std=c99 -Wall -Wextra` sin advertencias; los cuatro archivos del núcleo del modelo son aptos para generación de código. | I/A | Alta |
+| `PE-RNF-008` | El tiempo añadido al ciclo del LLC por la lectura de la IMU y la emisión de la trama no supera el 25 % del periodo nominal de 20 ms. | Medición con pin de traza u osciloscopio: ≤ 5 ms por ciclo. | T | Alta |
+| `PE-RNF-009` | El SEP degrada de forma segura ante la pérdida de la IMU: el filtro continúa solo con odometría, con incertidumbre creciente, y lo señaliza. | Desconexión de la IMU en caliente: el sistema no se detiene y marca el estado degradado. | T | Media |
 
 ---
 
@@ -134,13 +141,14 @@ Métodos de verificación: **T** = prueba, **A** = análisis, **D** = demostraci
 
 | ID | Restricción | Origen |
 |---|---|---|
-| `PE-CON-001` | El GPS **nunca** entra como medida de corrección del filtro; su uso es exclusivamente verdad de terreno para validación offline. | Decisión de diseño del TFG |
-| `PE-CON-002` | La decodificación de cuadratura es **x2** (ambos flancos de la fase A, fase B leída por GPIO). La resolución efectiva es la mitad de una decodificación x4. | `main.rs`, ISR INT0–INT5 |
-| `PE-CON-003` | El MPU-9250 comparte el bus I²C por software D42/D43 a ~100 kHz. No hay TWI por hardware disponible: D20/D21 están ocupados por INT0/INT1 (encoders FR/FL). | `soft_i2c.rs`; tabla de pines |
-| `PE-CON-004` | La configuración de compilación del LLC queda congelada para toda la campaña de pruebas. El mapeo de la fase B de FR/FL **depende del feature activo** (D44/D45 en `default`/`mixed-drivers`; A13/A14 con `all-bts7960`); compilar con el feature incorrecto invierte el signo de dos ruedas sin generar error. | `main.rs`, comentarios de mapeo |
-| `PE-CON-005` | El andamiaje de EKF existente en el LLC permanece deshabilitado. Al habilitar el IMU debe separarse el feature `no-mpu` en dos: lectura del IMU y ejecución del filtro local, con este último desactivado por omisión. | `main.rs`, `Cargo.toml` |
-| `PE-CON-006` | La validación de precisión en interiores usa marcadores y cinta métrica; el GPS solo es utilizable en exteriores y en trayectorias suficientemente largas frente a su incertidumbre. | § 6.2, Anexo B |
-| `PE-CON-007` | El proyecto dispone de 16 semanas y de un único desarrollador; toda solución que exija rediseño del cableado de encoders o del reparto de pines del ATmega2560 queda descartada. | Anteproyecto, § 2.3 |
+| `PE-CON-001` | El GPS **nunca** entra como medición del filtro. | Decisión de diseño del TFG |
+| `PE-CON-002` | La decodificación de cuadratura es **×2**: ambos flancos de la fase A; la fase B solo da el sentido. | `main.rs`, ISR INT0 a INT5 |
+| `PE-CON-003` | El MPU-9250 usa el bus I²C por software D42/D43 a ≈ 100 kHz (modo estándar). No hay TWI por hardware disponible: D20/D21 están ocupados por INT0/INT1. | `soft_i2c.rs`; tabla de pines |
+| `PE-CON-004` | La configuración de compilación del LLC queda congelada durante la campaña de pruebas. El mapeo de la fase B de FR/FL depende del feature activo; compilar con el feature incorrecto invierte el signo de dos ruedas sin error. | `main.rs` |
+| `PE-CON-005` | El andamiaje de EKF del LLC permanece deshabilitado. Al habilitar la IMU, el feature `no-mpu` debe separarse en lectura de IMU y filtro local, con el filtro local desactivado por omisión. | `main.rs`, `Cargo.toml` |
+| `PE-CON-006` | La evaluación de precisión usa marcadores fijos medidos con cinta métrica como referencia principal. El GPS (2,5 m CEP) no puede certificar un 3 % en las trayectorias previstas: necesitaría ≥ 520 m con criterio 3:1 sobre el radio de 95 %, unas 5 h a 2,9 cm/s. | § 6.2; Anexo B.3 |
+| `PE-CON-007` | El proyecto dispone de 16 semanas y un único desarrollador; se descarta toda solución que exija rediseñar el cableado de encoders o el reparto de pines del ATmega2560. | Anteproyecto |
+| `PE-CON-008` | La trama RAW vigente no tiene CRC. Mientras sea el formato en uso, el agente de estimación descarta muestras con $\Delta t \notin (0,\ 0{,}5\ \mathrm{s}]$ o con saltos de cuenta ≥ 20 000 por lado, y el filtro limita $\Delta t$ a $[1, 500]$ ms. | `raw_frame_from_bytes.m`, `hlc_step.m`, `sep_ekf_params.m` |
 
 ---
 
@@ -148,176 +156,142 @@ Métodos de verificación: **T** = prueba, **A** = análisis, **D** = demostraci
 
 ### 6.1 Presupuesto de latencia (`PE-RNF-002`)
 
-La latencia se mide como el intervalo entre el instante de muestreo en el LLC (`t_llc_ms`,
-propagado en la trama) y el instante de publicación de la pose en el HLC (reloj monotónico).
-El desfase entre ambos relojes se estima por regresión sobre una ventana larga y se resta.
+La latencia se mide entre el instante de muestreo en el LLC y la publicación de la pose en
+el HLC. Mientras no se verifique el reloj del LLC (`R-02`), el desfase y la escala entre
+ambos relojes se estiman por regresión sobre una ventana larga, usando las marcas de tiempo
+del HLC.
 
 | Etapa | Presupuesto | Fundamento |
 |---|---|---|
-| Muestreo en el LLC | ≤ 20 ms | Periodo del lazo determinista (`LOOP_MS = 20`) |
-| Lectura del IMU y armado de trama | ≤ 5 ms | `PE-RNF-008` |
-| Transmisión por `IF-02` | ≈ 4,4 ms | 50 B × 10 bits ÷ 115 200 baud |
-| Recepción y validación en el agente de adquisición | ≤ 10 ms | Incluye espera de planificación |
-| Agente de fusión | ≤ 10 ms | |
-| Agente de estimación (EKF) | ≤ 15 ms | Estado de 3 variables; costo dominado por planificación, no por aritmética |
-| Agente de comunicación | ≤ 10 ms | |
-| **Subtotal** | **≈ 74 ms** | |
-| Margen | ≈ 26 ms | 26 % del presupuesto |
+| Muestreo en el LLC | ≤ 20 ms | Periodo nominal del lazo |
+| Lectura de la IMU y armado de la trama | ≤ 5 ms | `PE-RNF-008`; la ráfaga I²C toma ≈ 2 ms |
+| Transmisión por `IF-02` | ≤ 7,0 ms | Trama RAW de hasta 81 B a 115 200 baud (4,8 ms con la trama binaria de 55 B) |
+| Recepción y validación (agente de adquisición) | ≤ 10 ms | Incluye la espera de planificación |
+| Edad adicional por buzón lleno | ≤ 20 ms | Con envío de tiempo límite cero, una trama descartada se reemplaza por la siguiente, un periodo después |
+| Agente de fusión | ≤ 5 ms | Conversión de acumuladores |
+| Agente de estimación (EKF de 5 estados) | ≤ 10 ms | Costo modelado ≈ 3 ms; dominado por la planificación |
+| Agente de comunicación | ≤ 5 ms | Costo modelado ≈ 2 ms |
+| **Total** | **≤ 82 ms** | Margen ≥ 18 ms |
 
-El presupuesto cierra con holgura. El riesgo no está en la aritmética del filtro sino en la
-**varianza de planificación** de los cuatro hilos POSIX bajo Linux no-tiempo-real: la cola es
-lo que puede violar el p95, no la media. Mitigación prevista: política `SCHED_FIFO` con
-prioridades escalonadas y fijación de afinidad de CPU en la capa de portabilidad.
+El riesgo no está en la aritmética del filtro sino en la variación de planificación de los
+hilos POSIX bajo Linux sin tiempo real (`R-07`). Mitigación: `SCHED_FIFO` con prioridades
+escalonadas y afinidad de CPU; requiere que el proceso tenga `CAP_SYS_NICE`.
 
 ### 6.2 Presupuesto de error (`PE-RNF-004`)
 
-El error se descompone según Borenstein y Feng en dos familias:
+El error se descompone en dos familias (Borenstein y Feng):
 
-- **Sistemático** — diámetros de rueda desiguales ($E_d$) y ancho de vía efectivo incorrecto
-  ($E_b$). Es el término dominante en superficie plana y **se corrige por calibración**
-  (Anexo B). Nota de riesgo: las ruedas de Olympus son impresas en 3D sin control de
-  tolerancias, por lo que $E_d$ puede ser sustancialmente mayor que en las plataformas
-  comerciales de la literatura.
-- **No sistemático** — deslizamiento, irregularidades del terreno, cuantización del encoder.
-  Es lo que atacan la corrección por giroscopio y la $R$ adaptativa (`PE-RF-007`,
-  `PE-RF-008`).
+- **Sistemático:** diferencia de escala entre lados ($E_d$) y ancho de vía efectivo
+  incorrecto ($E_b$). Se corrige por calibración (Anexo B). El barrido de sensibilidad del
+  modelo muestra que el **error de escala común domina**: 4 % de error en la escala produce
+  6 a 7 cm de error máximo en un UMBmark de 1 m, frente a < 3 cm por un 20 % de error en
+  $\chi$, porque el giroscopio corrige el rumbo pero no la distancia.
+- **No sistemático:** deslizamiento, irregularidades del terreno y cuantización. Lo atacan
+  la corrección por giroscopio y la adaptación de $Q$ (`PE-RF-010`, `PE-RF-011`).
 
-Asignación provisional del presupuesto de 3 %: ≤ 1,5 % sistemático residual tras
-calibración, ≤ 1,5 % no sistemático. **Esta partición es provisional y debe recalcularse
-cuando se cierre la caracterización del Anexo B.**
+Asignación provisional del 3 %: ≤ 1,5 % sistemático residual tras la calibración y ≤ 1,5 % no
+sistemático. Se recalcula al cerrar el Anexo B.
 
 ---
 
 ## 7. Matriz de trazabilidad
 
-| Objetivo específico | Indicador del anteproyecto | Requisitos que lo cubren | Entregable |
+| Objetivo específico | Indicador | Requisitos | Entregable (semana) |
 |---|---|---|---|
-| 1 — Integrar IMU y GPS | Encoders + IMU por UART ≥ 50 Hz; GPS ≥ 1 Hz | `PE-RF-001`, `PE-RF-002`, `PE-RF-003`, `PE-RNF-008` | Firmware LLC (sem. 7); módulo GPS (sem. 7) |
-| 2 — Aplicación multiagente | ≥ 4 agentes; entrega de mensajes ≥ 99 % | `PE-RF-004`–`PE-RF-008`, `PE-RNF-003`, `PE-RNF-007` | Doc. de arquitectura (sem. 5); aplicación (sem. 10) |
-| 3 — Integración HW/SW | Latencia < 100 ms sostenida ≥ 15 min | `PE-RF-009`, `PE-RNF-001`, `PE-RNF-002`, `PE-RNF-005`, `PE-RNF-006` | Sistema integrado (sem. 12) |
-| 4 — Evaluación de precisión | Error ≤ 3 % vs. simulación y verdad de terreno | `PE-RF-010`, `PE-RNF-004` | Modelo Simulink (sem. 6); informe (sem. 15) |
+| OE1: interfaz eléctrica de la IMU | Márgenes de ruido I²C, $t_r$ < 1000 ns, 45 000 lecturas sin errores | `PE-RF-001` | Esquemático y conexionado (5); caracterización medida (6) |
+| OE2: adquisición y telemetría | Encoders e IMU ≥ 50 Hz medidos con el reloj del HLC; GPS ≥ 1 Hz | `PE-RF-002`, `PE-RF-003`, `PE-RF-004`, `PE-RNF-008` | Firmware del LLC y módulo GPS (8) |
+| OE3: CMAES en Linux | Sin advertencias nuevas; 45 000 mensajes a 50 Hz | `PE-RF-005` | Biblioteca e informe de pruebas (8) |
+| OE4: aplicación multiagente | Cuatro agentes; entrega ≥ 99 % y ≤ 4 pérdidas seguidas | `PE-RF-006` a `PE-RF-011`, `PE-RNF-003`, `PE-RNF-007` | Arquitectura (5); aplicación (10) |
+| OE5: integración | Latencia < 100 ms sostenida ≥ 15 min | `PE-RF-012`, `PE-RNF-001`, `PE-RNF-002`, `PE-RNF-005`, `PE-RNF-006` | Sistema integrado (12) |
+| OE6: evaluación de precisión | Error ≤ 3 % frente a simulación y verdad de terreno | `PE-RF-013`, `PE-RNF-004` | Modelo de referencia (6); informe de evaluación (14) |
 
 ---
 
-## Anexo A — Interfaz del Canal 2
+## Anexo A: Canal de sensores
 
-La especificación completa del Canal 2 se publica como documento independiente:
+La especificación completa está en **ICD-PE-002 v2.0: Canal de sensores del subsistema de
+estimación de pose**. Resumen:
 
-> **ICD-PE-002 — Canal de sensores del subsistema de estimación de pose**
-
-Se separó de este documento porque el contrato de interfaz tiene dos implementaciones
-—el emisor en el firmware del LLC y el receptor en el agente de adquisición— que deben
-citar una misma fuente, y porque su ciclo de versiones es independiente del de esta
-especificación de requerimientos. Es el mismo tratamiento que recibe el ICD-LLC-001 en la
-documentación de la plataforma.
-
-Resumen de las características que este documento presupone:
-
-| Aspecto | Valor |
-|---|---|
-| Capa física | UART 115 200 baud, 8N1, unidireccional LLC → HLC sobre el USART libre |
-| Trama | 50 B: sincronismo (2 B) + carga útil (46 B) + CRC-16/CCITT (2 B) |
-| Contenido | Cuentas acumuladas de los seis encoders, acelerómetro, giroscopio, secuencia, marca de tiempo e indicadores |
-| Cadencia | 50 Hz, una trama por ciclo de control del LLC |
-| Utilización del enlace | 21,7 % a 115 200 baud |
-
-Los requisitos `PE-RF-001`, `PE-RF-002`, `PE-RNF-006` y `PE-RNF-008` son trazables hacia
-ese documento, y los asuntos abiertos que allí se registran —en particular la asignación
-definitiva del USART— condicionan la implementación del firmware.
-
----
-
-## Anexo B — Protocolo de caracterización y calibración
-
-Este anexo es **bloqueante**: los parámetros que produce alimentan el modelo de Simulink
-(actividad 4, ruta crítica), el EKF (actividad 7, ruta crítica) y la evaluación (actividad 10,
-ruta crítica). Hoy `config.rs` declara `TICKS_PER_REV = 20`, `WHEEL_RADIUS_MM = 50` y
-`WHEEL_BASE_MM = 280`, los tres marcados `TBD`.
-
-### B.1 Anomalía a resolver antes de calibrar
-
-Los datos disponibles de la campaña TRL-4 son mutuamente inconsistentes:
-
-| Dato | Valor reportado |
-|---|---|
-| Velocidad de saturación del encoder | 11 257 ticks/s |
-| Velocidad máxima del róver en suelo al 100 % de PWM | 0,029 m/s |
-| `TICKS_PER_REV` provisional | 20 |
-| `WHEEL_RADIUS_MM` provisional | 50 |
-
-Con esos valores, 11 257 ticks/s ÷ 20 = 563 rev/s ≈ 33 800 rpm, lo que implicaría 177 m/s.
-En sentido inverso, 0,029 m/s con radio de 50 mm son 0,092 rev/s, lo que exigiría ≈ 122 000
-ticks por vuelta. Bajo un modelo plausible del NFP-5840-31ZY-EN (≈ 11 pulsos por vuelta de
-motor, reducción ≈ 31:1, decodificación x2), lo esperable a 0,029 m/s sería del orden de
-decenas de ticks por segundo, no once mil.
-
-Hipótesis, en orden de probabilidad:
-
-1. **Conteo espurio** por rebote o interferencia electromagnética en las líneas de encoder.
-   Es coherente con ISR por cualquier flanco sin filtro temporal, con seis puentes H
-   conmutando cerca y con `RNF-005` (EMC/blindaje) explícitamente descopado del TRL-4.
-2. **Error en la medición de velocidad en suelo** (unidades, o medición con ruedas patinando).
-3. Combinación de ambas.
-
-Nota adicional de riesgo: si la tasa de 11 257 ticks/s por rueda fuese real, las seis ISR
-agregarían ~67 kHz de interrupciones, es decir una ISR cada ~237 ciclos a 16 MHz, lo que
-compromete el presupuesto de `PE-RNF-008` y compite con las ISR de USART. La caracterización
-es, por tanto, compuerta tanto de la precisión como del presupuesto de cómputo.
-
-### B.2 Secuencia de caracterización
-
-| Paso | Procedimiento | Salida |
+| Aspecto | Formato vigente (RAW) | Formato objetivo (SENSOR) |
 |---|---|---|
-| B.2.1 | Róver elevado, **motores sin energía**. Girar cada rueda 10 vueltas completas a mano, marcadas con referencia visible. Registrar cuentas. | Ticks por vuelta reales, libres de interferencia |
-| B.2.2 | Róver elevado, motores al 25 % de PWM. Contar ticks durante 60 s registrando en vídeo el giro real de la rueda. | Ticks por vuelta bajo interferencia |
-| B.2.3 | Comparar B.2.1 con B.2.2. Si difieren de forma significativa, se confirma conteo espurio: implementar rechazo de flancos separados por menos de un umbral temporal derivado de la velocidad máxima física, y repetir. | Diagnóstico y, si procede, corrección de firmware |
-| B.2.4 | Medir el diámetro de cada una de las seis ruedas con calibrador, en tres posiciones angulares. | Diámetro medio y dispersión → cota de $E_d$ |
-| B.2.5 | Medir la separación entre centros de ruedas izquierda y derecha. | `WHEEL_BASE_MM` nominal |
-| B.2.6 | Recorrido recto de longitud conocida sobre superficie de ensayo, ida y vuelta. | Ancho de vía efectivo $b_{\text{eff}}$ del modelo skid-steer, que difiere del nominal |
-| B.2.7 | Repetir la caracterización de la curva PWM–velocidad con los ticks ya validados. | Zona muerta, tramo lineal y saturación; entrada del modelo Simulink |
-
-Valores de partida conocidos de la campaña TRL-4, a reconfirmar: sin movimiento por debajo
-del 15 % de PWM, respuesta lineal entre 25 % y 75 %, saturación por encima del 75 %.
-
-### B.3 Protocolo de evaluación de precisión (UMBmark adaptado)
-
-La velocidad de desplazamiento condiciona el diseño del ensayo. Si se confirma el orden de
-0,029 m/s, un cuadrado UMBmark clásico de 4 × 4 m son 32 m por vuelta ≈ 18 min, y el
-protocolo completo de cinco vueltas en cada sentido superaría las tres horas de marcha,
-excediendo la autonomía de `RNF-007` (2 h). En ese caso:
-
-- Cuadrado reducido de **2 × 2 m** (8 m por vuelta, ≈ 4,6 min por vuelta, ≈ 46 min de campaña).
-- Tolerancia correspondiente al 3 %: **24 cm** de error de posición final, medible con cinta
-  métrica y plomada.
-- **El GPS queda descartado como verdad de terreno en este ensayo**: su incertidumbre es del
-  orden de la propia magnitud a medir. Su uso se restringe a trayectorias rectas largas en
-  exteriores (`PE-RF-003`, `PE-RF-010`).
-
-Si la caracterización del Anexo B.2 revela que la velocidad real es un orden de magnitud
-mayor, se recupera el cuadrado de 4 × 4 m y el protocolo UMBmark estándar.
-
-Escenarios exigidos por el indicador de la meta (≥ 3): trayectoria recta, giro en el lugar y
-trayectoria compuesta.
+| Capa física | USART0 → USB, 115 200 baud, 8N1 | Igual |
+| Trama | Texto `RAW:<tick>:<ax>:<ay>:<az>:<gx>:<gy>:<gz>:<encL>:<encR>\n`, 40 a 81 B | Binaria de 55 B, CRC-16/CCITT-FALSE (ICD-LLC-002 v1.1) |
+| Integridad | Ninguna; solo rechazo por plausibilidad | CRC |
+| Encoders | Dos acumuladores por lado | Seis acumuladores o modo suma por lado (bit `ENC_SIDE_SUM`) |
+| Marca de tiempo | `tick` en ms, del contador del LLC | `t_llc_us` en µs |
+| Cadencia | Una trama por ciclo del LLC | Igual |
 
 ---
 
-## Anexo C — Riesgos y asuntos abiertos
+## Anexo B: Caracterización, calibración y evaluación
 
-| ID | Asunto | Impacto | Acción y plazo |
+### B.1 Estado de la caracterización
+
+La campaña del 14/09/2026 resolvió la inconsistencia de la v0.2 entre la tasa de cuentas del
+encoder y la velocidad en suelo: con los valores medidos, la relación es ×2,80, dentro de la
+banda que acepta la verificación de consistencia del modelo.
+
+| Parámetro | Valor | Estado |
+|---|---|---|
+| Diámetro efectivo de las ruedas | 10,6 a 10,7 cm | `MED` |
+| Cuentas por vuelta (FR, FL, CR, CL, RR, RL) | 43 698, 54 159, 42 660, 42 882, 50 355, 44 876 | `MED` (anomalía B.2) |
+| Ancho de los ejes (F, C, R) | 58,1; 57,1; 71,4 cm | `MED` |
+| Ancho de vía nominal $b_{nom}$ | 0,622 m (promedio de los tres ejes) | `DER` |
+| Diferencia entre las constantes por lado | 3,7 % | `DER` |
+| Factor de ancho de vía efectivo $\chi$ | Pendiente | `TBD` |
+| Velocidad máxima en suelo (100 % PWM) | 0,029 m/s | `PROV` |
+| Sesgo del giroscopio y su deriva térmica | Pendiente | `TBD` |
+| Umbral de deslizamiento $\delta_{th}$ | 0,10 rad/s provisional; las simulaciones indican ≈ 0,006 rad/s a 2,9 cm/s | `TBD` |
+
+### B.2 Anomalías abiertas
+
+**Cuentas por vuelta.** El promedio de ≈ 46 400 cuentas por vuelta implicaría una reducción
+de ≈ 2111:1 con un sensor de 11 pulsos y decodificación ×2, que el motor no tiene, y la
+dispersión de 24,8 % entre ruedas no tiene explicación geométrica. Hipótesis principal:
+rebotes en los flancos del sensor Hall. Prueba: comparar las cuentas por vuelta a 20, 50 y
+80 % de PWM; si crecen con la velocidad, la causa es el rebote.
+
+**Diferencia entre lados.** Las pruebas recientes del róver muestran que, para una misma
+distancia recorrida, los acumuladores de los dos lados difieren más de lo que explica la
+asimetría de 3,7 % de las constantes por lado. La causa sigue sin explicarse. Pruebas
+propuestas: (1) girar las ruedas con el róver elevado y los motores sin energía, para
+separar el conteo del contacto con el suelo; (2) medir el diámetro de cada rueda en tres
+posiciones (las ruedas son impresas en 3D); (3) repetir la recta en ambos sentidos.
+
+### B.3 Protocolo de evaluación de precisión
+
+| Escenario | Distancia o giro | Cota | Referencia |
 |---|---|---|---|
-| `R-01` | Parámetros cinemáticos sin caracterizar e inconsistentes entre sí (Anexo B.1). | Bloquea el modelo Simulink, el EKF y toda la evaluación. Afecta cuatro actividades de la ruta crítica. | Ejecutar B.2.1–B.2.3 en semanas 3–4, antes de lo previsto en el cronograma. |
-| `R-02` | Espacio de pruebas no asignado. | Sin superficie plana de ≥ 3 × 3 m con anclaje para marcadores no hay evaluación de precisión. | Gestionar asignación en semana 4. |
-| `R-03` | `docs/encoder.md` del repositorio del LLC describe un diseño obsoleto de fase única sin dirección por hardware, contradiciendo la implementación real de `main.rs`. | Induce a error de diseño a cualquier desarrollador futuro. | Corregir el documento como aporte del TFG. |
-| `R-04` | Defecto latente: en el andamiaje de EKF del LLC, la conversión a la trama castea a entero antes de escalar (`ekf.x as i32 * 1000`), truncando a cero toda posición inferior a 1 m. | Nulo mientras el filtro esté deshabilitado; crítico si se habilita. | Registrar como hallazgo; corregir o eliminar junto con `PE-CON-005`. |
-| `R-05` | Riesgo de doble filtro: al habilitar el IMU se reactiva el EKF local del LLC si no se separa el feature de compilación. | Dos estimadores simultáneos rompen la trazabilidad del indicador de precisión. | Separar `no-mpu` en dos features antes del trabajo de firmware de la semana 7. |
-| `R-06` | Varianza de planificación de hilos POSIX bajo Linux no-tiempo-real. | Amenaza el p95 de `PE-RNF-002`, no la media. | Definir política de planificación en el documento de arquitectura de la semana 5. |
-| `R-07` | Ruedas impresas en 3D sin control de tolerancias. | Eleva el error sistemático $E_d$ y puede consumir todo el presupuesto de 3 %. | Cuantificar en B.2.4; si $E_d$ resulta dominante, evaluar corrección por calibración individual por rueda. |
+| Recta | 5 m | ≤ 15 cm (3 %) | Marcadores y cinta, ≤ 1 cm |
+| Giro en el lugar | 360° | ≤ 10,8° de rumbo (3 %) | Línea marcada en el piso, ≈ 1° |
+| UMBmark | Cuadrado de 2 m por lado (8 m) | ≤ 24 cm (3 %) | Marcadores y cinta, ≤ 1 cm |
+
+Las pausas de 3 s en las esquinas son parte del método: son el único momento en que el sesgo
+del giroscopio es observable (ZARU). El GPS se registra en las pruebas exteriores como
+referencia complementaria; no certifica el indicador (`PE-CON-006`).
 
 ---
 
-## Anexo D — Historial de revisiones
+## Anexo C: Riesgos y asuntos abiertos
+
+| ID | Asunto | Impacto | Acción |
+|---|---|---|---|
+| `R-01` | Parámetros pendientes ($\chi$, $\delta_{th}$, sesgo y deriva del giroscopio) y anomalías de B.2. | Los resultados del modelo no son concluyentes; la escala de la odometría tiene incertidumbre alta. | Ejecutar B.2 y la recta de calibración antes de la evaluación. |
+| `R-02` | **Reloj del LLC (hipótesis sin verificar).** El modelo predice que el lazo suma 20 ms a su contador sin medir el trabajo del ciclo, de modo que el ciclo real dura ≈ 30,6 ms (32,7 Hz) y el $\Delta t$ reportado es menor que el real. En simulación, esto lleva el error a ≈ 43 % en un UMBmark. **No se ha verificado en el róver**: el cambio que activa la IMU todavía no se ha probado. | Si se confirma, `PE-RF-003` no se cumple con el firmware actual y la odometría sobrestima los giros. | Después de probar la IMU, comparar el contador del LLC con las marcas de tiempo del HLC. Solo si se confirma, cambiar el firmware a un temporizador y transmisión por interrupción. |
+| `R-03` | La trama RAW no tiene CRC. | Un byte alterado produce un valor creíble. | Rechazo por plausibilidad (`PE-CON-008`); migrar a la trama SENSOR cuando el firmware se modifique. |
+| `R-04` | `docs/encoder.md` del LLC describe un diseño obsoleto. | Induce a error de diseño. | Corregir como aporte del TFG. |
+| `R-05` | Defecto latente en el andamiaje de EKF del LLC (`ekf.x as i32 * 1000`). | Nulo mientras el filtro local esté deshabilitado. | Registrar; corregir o eliminar junto con `PE-CON-005`. |
+| `R-06` | Doble filtro si se reactiva el EKF del LLC al habilitar la IMU. | Rompe la trazabilidad de la precisión. | Separar `no-mpu` antes del trabajo de firmware. |
+| `R-07` | Variación de planificación de hilos POSIX bajo Linux sin tiempo real. | Amenaza el p95 de `PE-RNF-002`. | `SCHED_FIFO`, prioridades escalonadas, afinidad de CPU y `CAP_SYS_NICE`. |
+| `R-08` | Ruedas impresas en 3D sin control de tolerancias. | Eleva $E_d$. | Cuantificar en B.2; calibrar por lado. |
+| `R-09` | El buzón de CMAES no puede sobrescribir y pasa punteros. | Bloquear al emisor pierde tramas en el puerto; sobrescribir sin rotación de búferes produce uso después de liberar. | Tiempo límite cero en la ruta de sensores (mínimo) y `MAES_QueueOverwrite` con rotación de búferes (mejora). |
+
+---
+
+## Anexo D: Historial de revisiones
 
 | Versión | Fecha | Cambios |
 |---|---|---|
-| v0.1 | Semana 3 | Emisión inicial. Requisitos derivados del anteproyecto y del SRS de Olympus v0.1. Parámetros cinemáticos pendientes de caracterización (Anexo B). |
-| v0.2 | Semana 4 | El Anexo A se extrae como documento independiente ICD-PE-002 v1.0 y se sustituye por una referencia cruzada. Sin cambios en los requisitos. |
+| v0.1 | Semana 3 | Emisión inicial a partir del anteproyecto y del SRS de Olympus v0.1. |
+| v0.2 | Semana 4 | El Anexo A se extrae como ICD-PE-002 v1.0. |
+| v0.3 | Semana 9 | Alineación con el modelo de simulación v2.0, la campaña del 14/09/2026 y las observaciones de los profesores asesores. Ver § 1.2. |
