@@ -109,7 +109,7 @@ void clear_all_receiverFunction(Agent_Msg* Message) {
 		Message->receivers[i] = (Agent_AID)NULL;
 		i++;
 	}
-	// BUGFIX (found while porting rock_paper_scissors, see docs/PORTING_NOTES.md):
+	// BUGFIX (found while porting rock_paper_scissors, see docs/README.md):
 	// the original FreeRTOS/CSP versions of this function never reset
 	// subscribers, only the array contents. Since Agent_Msg (called from
 	// every Cyclic/OneShot setup()) calls clear_all_receiver every round,

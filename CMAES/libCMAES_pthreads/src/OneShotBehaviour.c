@@ -73,7 +73,7 @@ void ConstructorOneShotBehaviour(OneShotBehaviour* Behaviour) {
 	Behaviour->setup = &setupFunctionOSB;
 	Behaviour->done = &doneFunctionOSB;
 	Behaviour->failure_detection = &failure_detectionFunctionOSB;
-	Behaviour->failure_identification = &failure_detectionFunctionOSB;
+	Behaviour->failure_identification = &failure_identificationFunctionOSB;
 	Behaviour->failure_recovery = &failure_recoveryFunctionOSB;
 	Behaviour->execute = &executeFunctionOSB;
 };

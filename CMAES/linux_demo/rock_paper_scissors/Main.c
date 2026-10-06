@@ -3,7 +3,7 @@
 // OneShotBehaviour, multi-receiver broadcast (send0), suspend/resume routed
 // through the AMS, and get_state - all useful groundwork for the Pose
 // Estimation agents, which will suspend/resume subsystem agents the same
-// way. See docs/PORTING_NOTES.md for the clear_all_receiver bug this game
+// way. See docs/README.md for the clear_all_receiver bug this game
 // exposed and fixed in the library itself.
 
 #include <CMAES.h>
@@ -21,7 +21,7 @@ Agent_Msg msg_playA, msg_playB, msg_watchover;
 //Random Number Generator Function: This function generates a random number between 0 and 2.
 //Inputs: None.
 //Outputs: Random number between 0 and 2.
-int getRandom() {
+int getRandom(void) {
 	return rand() % 3;
 };
 
