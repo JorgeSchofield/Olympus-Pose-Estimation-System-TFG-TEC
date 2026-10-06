@@ -16,7 +16,11 @@ SRC_URI = "git://github.com/JorgeSchofield/Olympus-Pose-Estimation-System-TFG-TE
 
 # Pin the revision. Bump this on every port change so sstate invalidates
 # correctly — never AUTOREV in a build that has to be reproducible.
-SRCREV = "ea4ce447549f3c852372d9e29c3a75feeedbdd99"
+# 6358206: install() rules after add_library (main at a56a5e8 fails to
+# configure) and the ConstructorUSER_DEF_COND prototype. The fetcher requires
+# SRCREV to be reachable from branch=main, so merge the master→main pull
+# request that carries this commit before running bitbake.
+SRCREV = "63582061683a3605a02ea673ddb63fafb084f353"
 PV = "0.1.0+git"
 
 # scarthgap: the git fetcher unpacks to ${WORKDIR}/git and file:// entries
@@ -30,42 +34,15 @@ OECMAKE_SOURCEPATH = "${S}/CMAES"
 
 inherit cmake systemd
 
-# Upstream defect: CMAES/CMakeLists.txt still refers to the pre-reorganization
-# path "CMAES/libCMAES_pthreads". After commit ea4ce44 that directory is a
-# direct child, so cmake fails with "not an existing directory". Delete this
-# prepend once the one-line fix lands upstream (change 1 in CHANGES.md).
-do_configure:prepend() {
-    sed -i 's|add_subdirectory(CMAES/libCMAES_pthreads)|add_subdirectory(libCMAES_pthreads)|' \
-        ${OECMAKE_SOURCEPATH}/CMakeLists.txt
-}
+# The port still has ~37 void/void* function-pointer mismatches in the
+# constructors. GCC 13 (scarthgap) only warns about them; GCC 14+ rejects them.
+# Kept as insurance until those assignments are fixed in the library.
+CFLAGS:append = " -Wno-error=incompatible-pointer-types"
 
-# Inert on scarthgap (GCC 13 only warns about these), kept as insurance: the
-# port has ~40 void/void* constructor mismatches, one NULL-to-pthread_t
-# assignment and one implicit function declaration, all of which GCC 14+
-# rejects outright. See changes 4 and 5 in CHANGES.md for the real fix.
-CFLAGS:append = " -Wno-error=incompatible-pointer-types \
-                  -Wno-error=int-conversion \
-                  -Wno-error=implicit-function-declaration"
-
-# Upstream CMakeLists.txt declares no install() rules, so install by hand.
-# Drop this whole function once change 3 in CHANGES.md is applied.
-do_install() {
-    install -d ${D}${libdir}
-    install -m 0644 ${B}/libCMAES_pthreads/libcmaes_pthreads.a ${D}${libdir}/
-
-    install -d ${D}${includedir}/cmaes
-    install -m 0644 ${OECMAKE_SOURCEPATH}/libCMAES_pthreads/include/CMAES.h \
-        ${D}${includedir}/cmaes/
-
-    install -d ${D}${bindir}
-    install -m 0755 ${B}/linux_demo/sender_receiver/cmaes_sender_receiver_demo \
-        ${D}${bindir}/
-    install -m 0755 ${B}/linux_demo/rock_paper_scissors/cmaes_rock_paper_scissors_demo \
-        ${D}${bindir}/
-
-    # The rover image is currently sysvinit (no INIT_MANAGER in local.conf,
-    # DISTRO = "poky"), so this branch does nothing today. It costs nothing
-    # and means the recipe is already correct if the image moves to systemd.
+# The library, header and demos are installed by the upstream install() rules
+# (default cmake do_install). Only the demo units are added here. They are
+# inert on a sysvinit image and installed only when DISTRO_FEATURES has systemd.
+do_install:append() {
     if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'true', 'false', d)}; then
         install -d ${D}${systemd_system_unitdir}
         install -m 0644 ${WORKDIR}/cmaes-demo-sender-receiver.service \

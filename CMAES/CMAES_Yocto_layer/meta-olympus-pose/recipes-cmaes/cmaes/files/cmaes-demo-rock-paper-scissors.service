@@ -5,7 +5,7 @@ After=multi-user.target
 
 [Service]
 Type=simple
-# Requires change 2 in CHANGES.md (setvbuf line buffering in main); without
+# Relies on setvbuf(stdout, NULL, _IOLBF, 0) in the demo's main(); without
 # it the journal stays empty for minutes, then dumps 4 KiB at once.
 ExecStart=/usr/bin/cmaes_rock_paper_scissors_demo
 Restart=no

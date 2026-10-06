@@ -24,14 +24,25 @@ recipes-core/images/olympus-image.bbappend       adds cmaes-demos to the rover i
 
 ## Install
 
+The layer lives inside the Pose Estimation repository, at
+`CMAES/CMAES_Yocto_layer/meta-olympus-pose`. Clone that repository next to
+the rover's build tree and add the layer by its path. The path must not
+contain spaces: `BBLAYERS` is a space-separated list, which is why the
+folder is `CMAES_Yocto_layer` and not `CMAES Yocto layer`.
+
 ```bash
 cd olympus-hlc-rpi5
-git clone <this layer> layers/meta-olympus-pose
+git clone https://github.com/JorgeSchofield/Olympus-Pose-Estimation-System-TFG-TEC.git layers/olympus-pose-repo
 source layers/poky/oe-init-build-env build
-bitbake-layers add-layer ../layers/meta-olympus-pose
+bitbake-layers add-layer ../layers/olympus-pose-repo/CMAES/CMAES_Yocto_layer/meta-olympus-pose
 bitbake cmaes            # recipe alone first
 bitbake olympus-image
 ```
+
+The clone only provides the layer metadata. The `cmaes` recipe fetches the
+sources itself from GitHub at the pinned `SRCREV` on branch `main`, so a
+library change reaches the image only after it is merged into `main` and
+`SRCREV` is bumped to that commit.
 
 Nothing in `local.conf` needs to change. `enable_uart=1` and
 `dtparam=i2c_arm=1` are already in `RPI_EXTRA_CONFIG`.
@@ -47,16 +58,21 @@ Nothing in `local.conf` needs to change. `enable_uart=1` and
 
 ## Caveats
 
-1. **Source changes.** `CMAES/CMakeLists.txt` has a broken
-   `add_subdirectory` path; the recipe patches it with a `sed` in
-   `do_configure:prepend`. See `CHANGES.md` — change 1 is required, the rest
-   remove workarounds carried here.
-2. **The rover image is sysvinit, not systemd.** `build/conf/local.conf`
-   sets no `INIT_MANAGER` and `DISTRO = "poky"` defaults to sysvinit, so the
-   `.service` files are installed but never run. Verify on the board with
-   `ps -p 1 -o comm=`. Run the demos from the shell instead, or set
-   `INIT_MANAGER = "systemd"` — which is a rebuild of the whole image and a
-   change to the rover's baseline, so not something to do casually.
+1. **Source status.** The recipe builds the upstream CMake project as is:
+   the `add_subdirectory` path and the `install()` rules are fixed upstream
+   (commit `6358206`), so there is no `sed` and no hand-written
+   `do_install`. One workaround remains: `-Wno-error=incompatible-pointer-types`
+   for about 37 `void`/`void*` function-pointer assignments in the
+   constructors. GCC 13 (scarthgap) only warns about them; GCC 14 and later
+   reject them, so they must be fixed in the library before moving off
+   scarthgap.
+2. **Init system: probably sysvinit, to be confirmed on the board.**
+   `build/conf/local.conf` sets no `INIT_MANAGER` and `DISTRO = "poky"`
+   defaults to sysvinit in scarthgap, so the `.service` files would be
+   installed but never run. The rover's own decision log says the image
+   uses systemd, so check with `ps -p 1 -o comm=`. On sysvinit, run the demos
+   from the shell. Do not change `INIT_MANAGER` for this: it rebuilds the
+   whole image and changes the rover's baseline.
 3. **`SCHED_FIFO` needs privilege.** Without `CAP_SYS_NICE` the port prints
    one warning and falls back to `SCHED_OTHER` with advisory priorities.
    Root has it.
