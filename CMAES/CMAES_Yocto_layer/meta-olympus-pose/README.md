@@ -54,18 +54,14 @@ Nothing in `local.conf` needs to change. `enable_uart=1` and
 | `cmaes` | empty (the library is static) |
 | `cmaes-staticdev` | `libcmaes_pthreads.a` |
 | `cmaes-dev` | `${includedir}/cmaes/CMAES.h` |
-| `cmaes-demos` | both demo binaries, plus units if the image uses systemd |
+| `cmaes-demos` | the three demo binaries (`sender_receiver`, `rock_paper_scissors`, `rps_stress`), plus units if the image uses systemd |
 
 ## Caveats
 
-1. **Source status.** The recipe builds the upstream CMake project as is:
-   the `add_subdirectory` path and the `install()` rules are fixed upstream
-   (commit `6358206`), so there is no `sed` and no hand-written
-   `do_install`. One workaround remains: `-Wno-error=incompatible-pointer-types`
-   for about 37 `void`/`void*` function-pointer assignments in the
-   constructors. GCC 13 (scarthgap) only warns about them; GCC 14 and later
-   reject them, so they must be fixed in the library before moving off
-   scarthgap.
+1. **Source status.** The recipe builds the upstream CMake project as is, with
+   no `sed`, no hand-written `do_install` and no `-Wno-error` flags. Since
+   `671bf4a` the library builds as strict C99 without warnings, so it is
+   ready for GCC 14 as well as scarthgap's GCC 13.
 2. **Init system: probably sysvinit, to be confirmed on the board.**
    `build/conf/local.conf` sets no `INIT_MANAGER` and `DISTRO = "poky"`
    defaults to sysvinit in scarthgap, so the `.service` files would be
