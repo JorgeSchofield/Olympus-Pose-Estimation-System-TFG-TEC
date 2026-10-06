@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document | ARQ-PE-003 — Agent architecture and LLC→HLC data path (draft) |
-| Version | v0.2 — 2026-10-01 (week 9 of the schedule). v0.2: pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
+| Version | v0.5 — 2026-10-05 (week 10). v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
 | Covers | Deliverable "Documento de arquitectura multiagente y protocolo serial LLC-HLC" (OE2, OE4; milestone H2) and the design basis for the OE4/OE5/OE6 validation |
 | Sources | Thesis report *Olympus_pose_TFG.pdf* (ch. 1, 2.1.4–2.1.8, 3.1–3.4, 4); `requirements/DRT-SEP-001.md` v0.2; `requirements/ICD-PE-002.md` v1.0; LLC firmware v2.20 (`Alonso11/rover-low-level-controller`, `src/main.rs`); HLC image (`Alonso11/olympus-hlc-rpi5`, `olympus_hlc` v3.x, `rover_bridge`); CMAES pthreads port (`CMAES/libCMAES_pthreads`); simulation model v2.0 (`JorgeSchofield/olympus-pose-estimation-simulation`, folder `Simulation Model v2.0`) |
 | Status | Design only — no code yet. Section 17 lists the changes this design implies for the thesis report |
@@ -95,8 +95,9 @@ IMU was enabled.
 `/dev/arduino_mega_hw`, and `llcmux` publishes the pty as `/dev/arduino_mega`.
 `olympus_hlc`, `olympus_controller.py` and the test scripts that hard-code
 `/dev/arduino_mega` (`test_bridge.py`, `test_rover.py`, …) all keep working with **zero
-code changes**. The cost is two `SYMLINK+=` values in
-`recipes-core/custom-udev-rules/files/*.rules`, which is configuration, not code. During
+code changes**. The rename is two `SYMLINK+=` values in `99-arduino.rules`, supplied from
+the pose layer through a `.bbappend` (§15.3), so no file of the rover's repository is
+edited. During
 the spike and bench work, before the image is rebuilt, `olympus_hlc --port /run/olympus/llc`
 gives the same result without touching any file.
 
@@ -130,7 +131,7 @@ the pose (PE-RF-013, OE2).
 | Item | Value | Consequence |
 |---|---|---|
 | Kernel | Mainline RPi kernel, **not PREEMPT_RT**; `CONFIG_CPU_FREQ_DEFAULT_GOV_POWERSAVE=y`, `arm_freq=1500` | Wake-up latency is the risk, not compute. Measure before tuning (§10.3) |
-| Init | sysvinit (`update-rc.d`); `olympus_hlc` is launched by hand (`python3 -m olympus_hlc --mode … [--port …]`) | `llcmux` and `olympus-pose` get init scripts; `olympus_hlc` keeps being launched by hand |
+| Init | **Unconfirmed.** The configuration in the HLC repository gives **sysvinit**: `local.conf` sets no `INIT_MANAGER`, and poky scarthgap defaults to `POKY_INIT_MANAGER = "sysvinit"`. The `meta-olympus-pose` README agrees. The HLC decision log (2026-03-18) says the opposite ("Scarthgap usa systemd por defecto"), and some rover recipes ship only systemd units. Check on the board with `ps -p 1 -o comm=`. `olympus_hlc` is launched by hand (`python3 -m olympus_hlc --mode … [--port …]`) | `llcmux` and `olympus-pose` ship **both** a SysV init script and a systemd unit (`inherit update-rc.d systemd`), so they start whichever init the image uses. `llcmux` sets its own priority and affinity in code instead of relying on unit options |
 | Privileges | `debug-tweaks`, root login | `SCHED_FIFO` (CAP_SYS_NICE) available when run as root |
 | Toolchain | No compiler in the image | Build with a Yocto recipe or the Yocto SDK (§15.3) |
 | CPU load | YOLOv8n-seg vision on the same SoC | The pose threads run at real-time priority, pinned (§10) |
@@ -225,7 +226,7 @@ the pose (PE-RF-013, OE2).
 | Record file | `--record <file>` | → | Every complete line as `<t_rx_ns>\t<line>` (written by a low-priority writer thread from a ring buffer) |
 
 Because `/dev/arduino_mega` only exists while `llcmux` runs, `llcmux` is started at boot
-by its init script and becomes required infrastructure. If an older image without the
+by its init script or systemd unit and becomes required infrastructure. If an older image without the
 udev change is used, `llcmux --hw /dev/arduino_mega --pty-link /run/olympus/llc` and
 `olympus_hlc --port /run/olympus/llc` give the same behaviour.
 
@@ -810,7 +811,7 @@ Unknown keys or missing required keys are a start-up error. The parsed set is wr
 | Equal slip on all six wheels | Not detectable (thesis §3.2.9) | Documented limitation | — |
 | Rollover | Tilt > threshold | Pose flagged | `ROLLOVER` |
 | `llcmux` dies | — | LLC watchdog FAULT ≤ 2 s (fail-safe) | — |
-| `olympus-pose` dies | — | `olympus_hlc` unaffected; restart by init script | — |
+| `olympus-pose` dies | — | `olympus_hlc` unaffected; the init script or systemd unit restarts it | — |
 | Log storage slow or full | Writer ring overflow | Records dropped and counted; pipeline unaffected | `writer_drops` |
 
 ---
@@ -822,12 +823,12 @@ Unknown keys or missing required keys are a start-up error. The parsed set is wr
 | L1 | Mailbox timed waits on **`CLOCK_MONOTONIC`** (`pthread_condattr_setclock`) | `CLOCK_REALTIME` jumps when the time is set at boot (no RTC battery) or by NTP, which breaks timeouts | Unit test: change the system time during a 1 s wait, timeout unaffected |
 | L2 | Add an **absolute-deadline wait** (`MAES_WaitUntil`, `clock_nanosleep(TIMER_ABSTIME)`) | `agent_wait` uses a relative `nanosleep`, so periodic loops drift (needed by the 50 Hz OE3 test and the LLC emulator) | Period jitter test |
 | L3 | Add **CPU affinity** (`MAES_SetAffinity(aid, cpu)`) | Thesis §3.4.5 relies on core pinning; the library has none | `/proc/<tid>/status` `Cpus_allowed_list` |
-| L4 | Fix `CMAES/CMakeLists.txt`: `add_subdirectory(libCMAES_pthreads)` (currently `CMAES/libCMAES_pthreads`, which does not exist relative to that file) | The build from `CMAES/` fails | CI/host build |
+| L4 | ~~Fix `CMAES/CMakeLists.txt` path~~ — **done upstream** (current `main`); only the layer's `SRCREV` must follow (§15.4, Y2) | — | — |
 | L5 | Configurable AMS priority (default 46 instead of the maximum) | D10 | `chrt -p` |
-| L6 | Upstream bugs: `failure_identification` is wired to `failure_detectionFunction`; `MAX_RECEIVERS` lacks parentheses | Latent defects | Code review + build without warnings |
+| L6 | Upstream bugs: `failure_identification` is wired to `failure_detectionFunction`; `MAX_RECEIVERS` lacks parentheses; `ConstructorUSER_DEF_COND` had no prototype in `CMAES.h` (§15.4, Y5; **fixed in 6358206**) | Latent defects; the missing prototype is an error from GCC 14 on | Code review + build without warnings and without the layer's `-Wno-error` flags |
 | L7 | (Optional, later) `MAES_QueueOverwrite` | Not needed with D2+D4 | — |
 | L8 | Keep: send/receive/AMS semantics unchanged | API compatibility with the FreeRTOS version | Existing demos |
-| L9 | Add `install()` rules to `libCMAES_pthreads/CMakeLists.txt` (static library + `CMAES.h`) | The library is already built by its own Yocto layer; another recipe (`olympus-pose`) can only link it if the library and header are installed into the sysroot (`-dev`/`-staticdev` packages) | `bitbake olympus-pose` links against the installed library |
+| L9 | ~~`install()` rules~~ — **done upstream**. `olympus-pose` builds the library with `add_subdirectory` from the same commit (§15.3), so it does not depend on them | — | — |
 
 After L1–L6, re-run the OE3 indicator: the 50 Hz rock-paper-scissors variant with 45 000
 messages, register/suspend/resume, and RSS stable.
@@ -897,14 +898,66 @@ reported, not edited.
 
 - **Development:** native build on an x86 Ubuntu host for `core/` tests and SIL runs
   (§16.1).
-- **Target:** the CMAES library is already built at image build time by its own layer on
-  top of the rover's Yocto image (thesis §3.1.5). Add a recipe `olympus-pose` (cmake class)
-  **to that same layer**, with `DEPENDS += "cmaes"` (the library recipe; needs L9). It
-  installs `olympus-pose`, `llcmux`, `pose.conf` and two sysvinit scripts (`llcmux` at S90
-  before any manual `olympus_hlc` launch, `olympus-pose` at S91). This is additive to the
-  image; `python3-rover-bridge` and `olympus_hlc` are not modified. Alternative during
-  development: the Yocto SDK (`bitbake olympus-image -c populate_sdk`) and `scp`, so each
-  change does not need a full image rebuild.
+- **Target:** the layer `meta-olympus-pose` (in this repository at `CMAES/CMAES_Yocto_layer/`, reviewed in §15.4) already
+  builds CMAES into the rover image. Add a recipe `olympus-pose` (classes `cmake`,
+  `update-rc.d`, `systemd`) to it. It fetches **this same repository at one SRCREV** and
+  builds `agents/`, whose `CMakeLists.txt` pulls the library in with
+  `add_subdirectory(../CMAES/libCMAES_pthreads)`. The application and the library therefore
+  always come from the same commit, and the app inherits the library's `_GNU_SOURCE`
+  definition and `Threads` link without needing an exported CMake package. The existing
+  `cmaes` recipe stays for the demos (OE3 indicator). In the layer's
+  `olympus-image.bbappend`, `cmaes-demos` is replaced by `olympus-pose` once the
+  application runs (keep the demos until milestone H3 is closed). The udev
+  rename of §3.2 is also done from that layer, with a `custom-udev-rules.bbappend`
+  (`FILESEXTRAPATHS:prepend := "${THISDIR}/files:"`) that supplies a replacement
+  `99-arduino.rules`. That file is identical to the original except for the symlink name
+  and an explicit systemd tag:
+
+  ```
+  SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="0042", SYMLINK+="arduino_mega_hw", TAG+="systemd", MODE="0666"
+  SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="arduino_mega_hw", TAG+="systemd", MODE="0666"
+  ```
+
+  So **no file in `olympus-hlc-rpi5` changes at all**; removing the layer from
+  `bblayers.conf` restores the original rover image. The recipe installs:
+  - `/usr/bin/olympus-pose`, `/usr/bin/llcmux`, `/etc/olympus-pose/pose.conf`;
+  - **for sysvinit** (what the repository configuration gives, §3.5): init scripts
+    `llcmux` (start priority 90, before any manual `olympus_hlc` launch) and
+    `olympus-pose` (91), each relaunching its daemon if it exits;
+  - **for systemd** (if the board turns out to use it): `llcmux.service` (`Restart=always`)
+    and `olympus-pose.service` (`Wants=`/`After=llcmux.service`, `Restart=on-failure`,
+    `LimitRTPRIO=50`, `LimitMEMLOCK=infinity`).
+
+  The classes install whichever matches `DISTRO_FEATURES`. In both cases `llcmux` and the
+  agents set their own `SCHED_FIFO` priority and CPU affinity in code (§10.1), and `llcmux`
+  waits for `/dev/arduino_mega_hw` itself (§6, rule 5), so nothing depends on init-specific
+  features. This is additive to the image; `python3-rover-bridge` and `olympus_hlc` are
+  not modified.
+- **Development loop:** `SRC_URI` points at GitHub, so a normal `bitbake` only sees pushed
+  commits. While iterating, use `devtool modify olympus-pose` (or `externalsrc`) against
+  the local checkout, or the Yocto SDK (`bitbake olympus-image -c populate_sdk`) and `scp`,
+  so each change does not need a push and a full image rebuild.
+
+### 15.4 Review of `meta-olympus-pose` (2026-10-05)
+
+The layer is well structured: separate collection name, priority 11 above `meta-olympus`,
+pinned `SRCREV`, static library split into `-staticdev`/`-dev`, demos in their own package
+with disabled units. Required changes before the application work starts:
+
+| ID | Finding | Effect | Change |
+|---|---|---|---|
+| Y1 | The layer lived at `CMAES/CMAES Yocto layer/meta-olympus-pose`: **a path with spaces** | `BBLAYERS` is a whitespace-separated list, so the layer could not be added from where it was | **Done (2aff319):** renamed to `CMAES/CMAES_Yocto_layer/meta-olympus-pose`, kept inside `CMAES/` as requested; README install steps clone the repository and add the layer by path |
+| Y2 | `SRCREV = ea4ce44…` built an old library. Worse, the current `main` (`a56a5e8`) **does not configure**: `install(TARGETS cmaes_pthreads)` ran before `add_library` (reproduced with an aarch64 cross build: "install TARGETS given target cmaes_pthreads which does not exist") | The layer could not build any recent library | **Done:** library fixed in `6358206` (install rules moved after the target); `SRCREV` pinned to it in `2aff319`. `6358206` is on `master`: merge the master→main pull request before running bitbake, because the recipe fetches `branch=main` |
+| Y3 | Workarounds for problems already fixed upstream: the `sed` on `add_subdirectory`, the hand-written `do_install` | Dead code once Y2 is done | **Done (2aff319):** both removed; default `cmake` install plus `do_install:append` for the demo units. Verified that the upstream install rules produce exactly the four packaged files |
+| Y4 | README caveat 1 and the recipe comments reference `CHANGES.md` (changes 1–5), which is not in the repository | Unverifiable references; changes 4–5 (GCC 14 errors) are not traceable | Add `CHANGES.md` or fold its content into `CMAES/docs/README.md`; mark 1–3 as done |
+| Y5 | `ConstructorUSER_DEF_COND` was **not declared** in `CMAES.h` (thesis §3.1.5 says it was added) | Implicit function declaration in `Agent_Platform.c`: a warning on GCC 13, an error on GCC 14+ | **Done:** prototype added in `6358206`; `-Wno-error=implicit-function-declaration` and `=int-conversion` dropped from the recipe (neither is triggered any more). `=incompatible-pointer-types` stays for the 37 remaining `void`/`void*` constructor assignments (GCC 14 cleanup, not blocking on scarthgap) |
+| Y6 | `CMAES/README.md`, `Agent_Msg.c` and `rock_paper_scissors/Main.c` point to `docs/PORTING_NOTES.md`, which is now `docs/README.md` | Broken references in the deliverable | Update the references |
+| Y7 | 84 build artefacts are committed under `CMAES/build/` (x86 binaries, `CMakeCache.txt` with an absolute path) | Clutter; a stale cache can confuse a local `cmake -B build` | Delete them and add `build/` to `.gitignore` |
+| Y8 | README caveat 2 says the image is sysvinit; the HLC decision log says systemd | The units may never run | Check `ps -p 1 -o comm=` on the board; the `olympus-pose` recipe ships both (§15.3) |
+| Y9 | The library builds as C11 (`CMAKE_C_STANDARD 11`); PE-RNF-007 asks for C99 | Inconsistent with the requirement as written | Try `-std=c99` together with L1–L6. If it compiles cleanly, switch; otherwise state in §3.1 that the library is C11 and the application C99 |
+| Y10 | The local working folder was not a git checkout and was older than GitHub | — | **Done:** working clone at `…/Olympus-Pose-Estimation-System-TFG-TEC` (branch `master`, PRs into `main`) |
+
+Y1–Y3, Y5 and Y10 are done (2026-10-05). Y4, Y6–Y9 are hygiene and remain open.
 
 ---
 
@@ -1160,6 +1213,11 @@ monotonic clock and the affinity call are design changes, not bug fixes.
   says the current channel is the `RAW:` ASCII frame on USART0, with a **55-byte** binary
   frame as the target. Issue v1.1 documenting the `RAW:` frame as current, the binary frame
   as target (fix 50 vs 55 bytes), and the `llcmux` sharing.
+- **HLC documentation** (`olympus-hlc-rpi5/docs`, not edited by this project): with the pose
+  layer installed, `testing.md` ("`/dev/arduino_mega -> ttyACM0`") and `architecture.md`
+  ("udev symlink → ttyACM0") no longer describe the device. `/dev/arduino_mega` then points
+  to a pty and the real port is `/dev/arduino_mega_hw`. Document this in the integration
+  manual of this project, and tell the owner of the HLC repository.
 
 ### 17.14 Simulation model repository (`Simulation Model v2.0`)
 
@@ -1175,6 +1233,21 @@ These are changes to the model code and its README, which the thesis cites in §
   fusion, estimation and communication as separate stages; the GPS agent is not modelled.
 - The README codegen boundary says "only the four core files" become C. Update it to six.
 
+### 17.15 New decision table for §3.4
+
+Section 3.2 closes with an architecture-decision table (Table 3.6), but §3.4 has none. Add
+one with the same format (decision / options evaluated / justification), so the
+alternatives raised during the design, including the adviser's, are on record:
+
+| Decisión | Opciones evaluadas | Justificación |
+|---|---|---|
+| Compartir el enlace con un multiplexor independiente (`llcmux`) | Canal 2 dedicado (USART libre + adaptador); modificar `rover_bridge`; agente pasarela dentro de la aplicación CMAES | No requiere cambios de firmware ni de código del software existente. Una falla de la aplicación de estimación no corta el enlace de `olympus_hlc`. Con el agente pasarela, cualquier caída, reinicio o suspensión de la aplicación detendría el róver |
+| Retirar las tramas `RAW:` del flujo que recibe `olympus_hlc` | Copia idéntica byte a byte | `olympus_hlc` lee una línea por ciclo; a 50 tramas por segundo la telemetría quedaría rezagada |
+| Mensajes acumulados entre fusión y estimación | Incrementos; incrementos con arrastre | Un mensaje perdido cuesta resolución temporal y no distancia; ω_enc y δ siguen siendo coherentes en los huecos |
+| Activación por eventos | Agente de estimación periódico (20 ms) | Elimina hasta 20 ms de retardo de fase y el caso de tasas iguales de la sección 3.3.6 |
+| GPS como quinto agente | Proceso aparte | Pose y referencia comparten reloj y registro (PE-RF-013) |
+| Núcleo en C generado con MATLAB Coder | Código escrito a mano | Una sola implementación del algoritmo, la del modelo de referencia |
+
 ---
 
 ## 18. Open items and risks
@@ -1182,12 +1255,12 @@ These are changes to the model code and its README, which the thesis cites in §
 | ID | Item | Needed for | Proposed action |
 |---|---|---|---|
 | S-1 | **Spike:** confirm `rover_bridge` works through a pty. Run `tools/spike_pty_check.py` on the rover as root; it uses a fake LLC and never touches the real port | D1 | First task; if it fails, fall back to a tee hook in `rover_bridge` (needs owner approval) |
-| Q-1 | ~~pty naming~~ — **closed:** udev rename + `llcmux` publishes `/dev/arduino_mega` (§3.2, D13) | — | Agree the two-line udev change with the owner of `olympus-hlc-rpi5` |
+| Q-1 | ~~pty naming~~ — **closed:** udev rename (from the pose layer, via `.bbappend`) + `llcmux` publishes `/dev/arduino_mega` (§3.2, §15.3, D13) | — | Inform the owner of `olympus-hlc-rpi5`; that repository is not edited |
 | Q-2 | ~~Model files missing~~ — **closed:** `Simulation Model v2.0` reviewed; changes listed in §9.4 and §17.14 | — | — |
-| Q-3 | ~~Hand-written vs generated~~ — **closed:** MATLAB Coder from the unchanged core files + two wrappers (D14); MATLAB license available | — | Confirm the **MATLAB Coder** toolbox is included in it (`license('test','MATLAB_Coder')` returns 1, or it appears in `ver`); MATLAB alone cannot generate C |
+| Q-3 | ~~Hand-written vs generated~~ — **closed:** MATLAB Coder from the unchanged core files + two wrappers (D14); MATLAB and MATLAB Coder licenses confirmed (2026-10-05) | — | — |
 | Q-4 | ~~GPS connection~~ — **closed:** GPIO UART `/dev/ttyAMA0` (§7.5) | — | Before connecting: TX level, `/dev/ttyAMA0` present, no console on it (§7.5 checklist) |
 | Q-5 | ~~How CMAES is built~~ — **closed:** own Yocto layer, built at image build time; `olympus-pose` recipe goes in the same layer (§15.3, L9) | — | — |
-| Q-6 | Adviser's proposal: an agent that owns the LLC port and distributes its data, instead of the separate `llcmux` process | D1 | Under discussion; trade-offs in the 2026-10-01 review |
+| Q-6 | ~~Gateway agent owning the LLC port~~ — **closed (2026-10-05): not adopted.** Keep the separate `llcmux` process (D1). Reason: with the port inside the pose application, any crash, restart or AMS suspension of the experimental application would cut `olympus_hlc`'s link and stop the rover, which is hard to reconcile with PE-RNF-006; the separate process keeps the design simpler | — | Record the alternative and the reason in the thesis decision table (§17.15) |
 | R-1 | LLC clock (65 % hypothesis) and ≈ 33 Hz frame rate with v2.20 | OE2, OE6 | §10.4 measures it; OE4 tested with the 50 Hz emulator meanwhile |
 | R-2 | Counts-per-revolution anomaly (Hall bounce) | λ, `rate_max_counts_s`, rest detection (bounce would prevent `STILL`) | V-CAL-1; inspect counts while stationary |
 | R-3 | Tail latency on a non-RT kernel with vision load and the powersave governor | OE5 | V-OE5-1 first; then optional `isolcpus`/governor (§10.1) |
