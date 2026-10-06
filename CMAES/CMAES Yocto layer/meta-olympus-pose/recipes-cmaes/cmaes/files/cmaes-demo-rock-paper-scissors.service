@@ -1,0 +1,19 @@
+[Unit]
+Description=CMAES rock/paper/scissors demo (AMS suspend-resume, broadcast)
+Documentation=https://github.com/JorgeSchofield/Olympus-Pose-Estimation-System-TFG-TEC
+After=multi-user.target
+
+[Service]
+Type=simple
+# Requires change 2 in CHANGES.md (setvbuf line buffering in main); without
+# it the journal stays empty for minutes, then dumps 4 KiB at once.
+ExecStart=/usr/bin/cmaes_rock_paper_scissors_demo
+Restart=no
+User=root
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

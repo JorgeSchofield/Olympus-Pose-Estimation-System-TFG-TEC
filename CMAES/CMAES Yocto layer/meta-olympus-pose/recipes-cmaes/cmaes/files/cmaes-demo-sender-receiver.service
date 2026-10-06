@@ -1,0 +1,22 @@
+[Unit]
+Description=CMAES sender/receiver demo (pthreads backend)
+Documentation=https://github.com/JorgeSchofield/Olympus-Pose-Estimation-System-TFG-TEC
+After=multi-user.target
+
+[Service]
+Type=simple
+# Requires change 2 in CHANGES.md (setvbuf line buffering in main); without
+# it the journal stays empty for minutes, then dumps 4 KiB at once.
+ExecStart=/usr/bin/cmaes_sender_receiver_demo
+Restart=no
+# The agents ask for SCHED_FIFO. Running as root is the simplest way to
+# have that succeed; the alternative is AmbientCapabilities=CAP_SYS_NICE
+# with a dedicated user.
+User=root
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
