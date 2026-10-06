@@ -73,7 +73,7 @@ void ConstructorCyclicBehaviour(CyclicBehaviour* Behaviour) {
 	Behaviour->setup = &setupFunction;
 	Behaviour->done = &doneFunction;
 	Behaviour->failure_detection = &failure_detectionFunction;
-	Behaviour->failure_identification = &failure_detectionFunction;
+	Behaviour->failure_identification = &failure_identificationFunction;
 	Behaviour->failure_recovery = &failure_recoveryFunction;
 	Behaviour->execute = &executeFunction;
 };

@@ -16,11 +16,11 @@ SRC_URI = "git://github.com/JorgeSchofield/Olympus-Pose-Estimation-System-TFG-TE
 
 # Pin the revision. Bump this on every port change so sstate invalidates
 # correctly — never AUTOREV in a build that has to be reproducible.
-# 6358206: install() rules after add_library (main at a56a5e8 fails to
-# configure) and the ConstructorUSER_DEF_COND prototype. The fetcher requires
-# SRCREV to be reachable from branch=main, so merge the master→main pull
-# request that carries this commit before running bitbake.
-SRCREV = "63582061683a3605a02ea673ddb63fafb084f353"
+# f963532: library real-time helpers and fixes (671bf4a, builds as strict
+# C99 with no warnings) plus the rps_stress OE3 test demo. The fetcher
+# requires SRCREV to be reachable from branch=main, so merge the master->main
+# pull request that carries this commit before running bitbake.
+SRCREV = "f96353273d630743b4bf9bbc134f6240de1a2e29"
 PV = "0.1.0+git"
 
 # scarthgap: the git fetcher unpacks to ${WORKDIR}/git and file:// entries
@@ -34,10 +34,8 @@ OECMAKE_SOURCEPATH = "${S}/CMAES"
 
 inherit cmake systemd
 
-# The port still has ~37 void/void* function-pointer mismatches in the
-# constructors. GCC 13 (scarthgap) only warns about them; GCC 14+ rejects them.
-# Kept as insurance until those assignments are fixed in the library.
-CFLAGS:append = " -Wno-error=incompatible-pointer-types"
+# No -Wno-error flags: since 671bf4a the library has no void/void* mismatches
+# and builds cleanly with GCC 14 / Clang 20 as well as scarthgap's GCC 13.
 
 # The library, header and demos are installed by the upstream install() rules
 # (default cmake do_install). Only the demo units are added here. They are
@@ -56,6 +54,7 @@ PACKAGES =+ "${PN}-demos"
 
 FILES:${PN}-demos = "${bindir}/cmaes_sender_receiver_demo \
                      ${bindir}/cmaes_rock_paper_scissors_demo \
+                     ${bindir}/cmaes_rps_stress_demo \
                      ${systemd_system_unitdir}/cmaes-demo-*.service"
 
 SYSTEMD_PACKAGES = "${PN}-demos"

@@ -17,9 +17,13 @@ struct MAES_Queue {
 };
 
 // Builds an absolute deadline usable by pthread_cond_timedwait from a
-// relative timeout in milliseconds.
+// relative timeout in milliseconds. The condition variables are bound to
+// CLOCK_MONOTONIC (see MAES_QueueCreate), so the deadline must use the same
+// clock. CLOCK_REALTIME would jump when the wall clock is set at boot (the
+// RPi 5 has no RTC battery by default) or by NTP, stretching or cutting short
+// every pending timeout.
 static void deadline_from_timeout(struct timespec* deadline, MAESTickType_t timeout_ms) {
-	clock_gettime(CLOCK_REALTIME, deadline);
+	clock_gettime(CLOCK_MONOTONIC, deadline);
 	deadline->tv_sec += timeout_ms / 1000;
 	deadline->tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
 	if (deadline->tv_nsec >= 1000000000L) {
@@ -34,8 +38,12 @@ MAES_Queue* MAES_QueueCreate(void) {
 		return NULL;
 	}
 	pthread_mutex_init(&q->lock, NULL);
-	pthread_cond_init(&q->not_empty, NULL);
-	pthread_cond_init(&q->not_full, NULL);
+	pthread_condattr_t attr;
+	pthread_condattr_init(&attr);
+	pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+	pthread_cond_init(&q->not_empty, &attr);
+	pthread_cond_init(&q->not_full, &attr);
+	pthread_condattr_destroy(&attr);
 	q->full = false;
 	return q;
 }

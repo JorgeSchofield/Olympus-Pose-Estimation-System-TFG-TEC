@@ -6,7 +6,7 @@
 //Register Condition Function: Enables or disables the possibility of registering an agent. 
 //Inputs: None.
 //Outputs: True value indicating that the condition is enabled or false value indicating that the condition is disabled.
-bool register_condFunction()
+bool register_condFunction(void)
 {
     return true;
 }
@@ -14,7 +14,7 @@ bool register_condFunction()
 //Kill Condition Function: Enables or disables the possibility of killing an agent. 
 //Inputs: None.
 //Outputs: True value indicating that the condition is enabled or false value indicating that the condition is disabled.
-bool kill_condFunction()
+bool kill_condFunction(void)
 {
     return true;
 }
@@ -22,7 +22,7 @@ bool kill_condFunction()
 //Deregister Condition Function: Enables or disables the possibility of deregistering an agent. 
 //Inputs: None.
 //Outputs: True value indicating that the condition is enabled or false value indicating that the condition is disabled.
-bool deregister_condFunction()
+bool deregister_condFunction(void)
 {
     return true;
 }
@@ -30,7 +30,7 @@ bool deregister_condFunction()
 //Suspend Condition Function: Enables or disables the possibility of suspending an agent. 
 //Inputs: None.
 //Outputs: True value indicating that the condition is enabled or false value indicating that the condition is disabled.
-bool suspend_condFunction()
+bool suspend_condFunction(void)
 {
     return true;
 }
@@ -38,7 +38,7 @@ bool suspend_condFunction()
 //Resume Condition Function: Enables or disables the possibility of resuming an agent. 
 //Inputs: None.
 //Outputs: True value indicating that the condition is enabled or false value indicating that the condition is disabled.
-bool resume_condFunction()
+bool resume_condFunction(void)
 {
     return true;
 }
@@ -46,7 +46,7 @@ bool resume_condFunction()
 //Restart Condition Function: Enables or disables the possibility of restarting an agent. 
 //Inputs: None.
 //Outputs: True value indicating that the condition is enabled or false value indicating that the condition is disabled.
-bool restart_condFunction()
+bool restart_condFunction(void)
 {
     return true;
 }

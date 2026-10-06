@@ -22,7 +22,7 @@ This project exists because a thesis Pose Estimation system for Olympus
 needs that same agent/behaviour structure — sensor-input agents, a
 fusion/estimation agent, message-passing between them — but running on
 **Linux on a Raspberry Pi 5**, not FreeRTOS. See
-[`docs/PORTING_NOTES.md`](docs/PORTING_NOTES.md) for the full analysis of
+[`docs/README.md`](docs/README.md) for the full analysis of
 the original code and the design decisions behind the port.
 
 ## Repository layout
@@ -35,7 +35,7 @@ linux_demo/
   sender_receiver/           two-agent mailbox smoke test
   rock_paper_scissors/       three-agent test: broadcast, suspend/resume via
                              the AMS, get_state, OneShotBehaviour
-docs/PORTING_NOTES.md        findings from reading the original code + every
+docs/README.md        findings from reading the original code + every
                              design decision made while porting it
 CMakeLists.txt               top-level build (libCMAES_pthreads + linux_demo)
 ```
@@ -55,6 +55,7 @@ cmake --build build
 
 ./build/linux_demo/sender_receiver/cmaes_sender_receiver_demo
 ./build/linux_demo/rock_paper_scissors/cmaes_rock_paper_scissors_demo
+./build/linux_demo/rps_stress/cmaes_rps_stress_demo 45000 20 3
 ```
 
 - **`sender_receiver`**: two agents exchange a message once a second through
@@ -67,13 +68,21 @@ cmake --build build
   `OneShotBehaviour`, suspend/resume, and `get_state` — the same primitives
   the Pose Estimation agents will use to pause/resume subsystems. Runs
   indefinitely; `Ctrl+C` to stop.
+- **`rps_stress`**: the OE3 indicator test. Same game, but each player
+  throws every `period_ms` (default 20 ms, 50 Hz) with `MAES_DelayUntil`,
+  every round suspends and resumes both players through the AMS, and the
+  run stops after a target number of messages (default 45 000). Each
+  payload carries a per-player sequence number and a checksum, so lost,
+  duplicated or overwritten messages are detected; RSS is sampled after
+  warm-up and at the end. Prints a summary and exits with 0 (`PASS`) or 1.
+  Arguments: `[messages] [period_ms] [cpu]`; run as root for `SCHED_FIFO`.
 
 Both are direct ports of the demos the original FreeRTOS repo ships;
 porting the second one surfaced and fixed two real bugs in the original
-library/demo — see `docs/PORTING_NOTES.md` §8.
+library/demo — see `docs/README.md` §8.
 
 The one behaviour that differs between a VM and the rover is real-time
-scheduling privilege (`docs/PORTING_NOTES.md` §3). On an unprivileged VM the
+scheduling privilege (`docs/README.md` §3). On an unprivileged VM the
 demos still run correctly, but agent priorities are advisory rather than
 enforced, and a one-time warning is printed to stderr.
 
@@ -200,7 +209,7 @@ priority; the `sub` strips the `pid (comm)` prefix first, which shifts the
 field numbers by two. Observed: `policy=0` on the main thread, which only
 calls `boot` and waits, and `policy=1` (`SCHED_FIFO`) with a non-zero
 `rtprio` on every agent and AMS thread. The fallback warning
-(`docs/PORTING_NOTES.md` §3) was not emitted.
+(`docs/README.md` §3) was not emitted.
 
 ### Not yet characterised
 
@@ -211,30 +220,26 @@ period jitter of a cyclic behaviour at 50 Hz, message delivery rate with
 depth-1 mailboxes under load, end-to-end latency across the agent chain, and
 memory/thread stability over a long run.
 
-Two defects found while planning those measurements, both relevant to the
-rover and neither triggered by the demos:
+Two defects found while planning those measurements are now fixed (see
+`docs/README.md` §3, "Real-time helpers"):
 
 - `agent_waitFunction` uses a **relative** `nanosleep`, so a periodic
-  behaviour's period drifts by its own execution time plus wakeup latency
-  on every iteration. Periodic work needs an absolute deadline
-  (`clock_nanosleep` with `TIMER_ABSTIME` on `CLOCK_MONOTONIC`).
-- The mailbox condition variables use **`CLOCK_REALTIME`**. The Pi 5 has no
-  battery-backed RTC, so the wall clock steps when time sync lands after
-  boot, and a `pthread_cond_timedwait` in flight across that step either
-  returns immediately or blocks for the size of the jump.
-  `pthread_condattr_setclock(..., CLOCK_MONOTONIC)` is the fix.
+  behaviour's period drifts. Periodic work now uses `MAES_DelayUntil`, an
+  absolute `clock_nanosleep(TIMER_ABSTIME)` deadline on `CLOCK_MONOTONIC`.
+- The mailbox condition variables used **`CLOCK_REALTIME`**, which steps
+  when time sync lands after boot. They are now bound to `CLOCK_MONOTONIC`.
 
 ### Portability notes
 
-- **GCC 14 and newer reject this code as written.** Since GCC 14,
-  `-Wincompatible-pointer-types` and `-Wint-conversion` are errors by
-  default, and the port inherits ~38 `void`/`void*` vtable mismatches from
-  the original library, one `NULL`-to-`pthread_t` assignment, and one
-  implicit function declaration. scarthgap's GCC 13 only warns. The recipe
-  carries `-Wno-error=` flags as insurance; correcting the signatures is the
-  real fix. See `docs/PORTING_NOTES.md` §5.
-- **The rover image uses sysvinit**, not systemd, so the `.service` files
-  the layer ships are installed but inert. Run the demos from the shell.
+- **GCC 14 / Clang 20 ready.** The `void`/`void*` vtable mismatches, the
+  `NULL`-to-`pthread_t` assignment and the implicit function declaration
+  inherited from the original library are fixed; the library builds as
+  strict C99 with no warnings under Clang 20 (`docs/README.md` §4). The
+  recipe's last `-Wno-error` flag can go once `SRCREV` includes this.
+- **Init system: probably sysvinit** (repository configuration), to be
+  confirmed on the board with `ps -p 1 -o comm=`. On sysvinit the
+  `.service` files the layer ships are installed but inert; run the demos
+  from the shell.
 - **The Raspberry Pi kernel is not `PREEMPT_RT`.** `SCHED_FIFO` gives
   priority ordering, not a bounded worst case.
 

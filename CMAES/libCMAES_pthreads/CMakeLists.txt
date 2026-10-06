@@ -2,8 +2,11 @@ cmake_minimum_required(VERSION 3.10)
 project(cmaes_pthreads C)
 include(GNUInstallDirs)
 
-set(CMAKE_C_STANDARD 11)
+# C99, as required for the HLC code (PE-RNF-007). Extensions off gives
+# -std=c99 rather than gnu99; the POSIX/GNU APIs come from _GNU_SOURCE below.
+set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
 
 find_package(Threads REQUIRED)
 

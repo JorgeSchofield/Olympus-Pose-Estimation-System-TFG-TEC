@@ -5,6 +5,7 @@
 #include <sched.h>
 #include <unistd.h>
 #include <time.h>
+#include <errno.h>
 
 /*
  * pthreads backend notes (see the port plan for the full rationale):
@@ -164,22 +165,105 @@ static void MAES_SetPriority(Agent_AID aid, int rt_priority) {
 	}
 }
 
-static int MAES_RTPrioFor(MAESUBaseType_t maesPriority) {
+// AMS real-time priority. Default 46: below the kernel's threaded IRQ handlers
+// (SCHED_FIFO 50 on Linux), so the USB/serial interrupt threads that deliver
+// sensor data are never starved by the agent platform. Override with
+// MAES_SetAMSPriority() before boot().
+static int ams_rt_priority = MAES_DEFAULT_AMS_PRIORITY;
+
+void MAES_SetAMSPriority(int rt_priority) {
+	ams_rt_priority = rt_priority;
+}
+
+static int MAES_AMSRTPrio(void) {
 	int min = sched_get_priority_min(SCHED_FIFO);
 	int max = sched_get_priority_max(SCHED_FIFO);
 	if (min < 0 || max < 0) {
 		return 0;
 	}
-	int p = min + (int)maesPriority;
-	if (p > max - 1) { // keep the top slot reserved for the AMS
-		p = max - 1;
+	int p = ams_rt_priority;
+	if (p > max) {
+		p = max;
+	}
+	if (p < min + 1) { // leave at least one level below it for the agents
+		p = min + 1;
 	}
 	return p;
 }
 
-static int MAES_AMSRTPrio(void) {
-	int max = sched_get_priority_max(SCHED_FIFO);
-	return max > 0 ? max : 0;
+// Agents map their ordinal MAES priority onto SCHED_FIFO as min + priority,
+// always kept strictly below the AMS.
+static int MAES_RTPrioFor(MAESUBaseType_t maesPriority) {
+	int min = sched_get_priority_min(SCHED_FIFO);
+	if (min < 0) {
+		return 0;
+	}
+	int ceiling = MAES_AMSRTPrio() - 1;
+	int p = min + (int)maesPriority;
+	if (p > ceiling) {
+		p = ceiling;
+	}
+	return p;
+}
+
+// CPU affinity (no FreeRTOS equivalent). cpu < 0 leaves the affinity alone.
+bool MAES_SetAffinity(Agent_AID aid, int cpu) {
+	if (cpu < 0) {
+		return true;
+	}
+	cpu_set_t set;
+	CPU_ZERO(&set);
+	CPU_SET(cpu, &set);
+	if (pthread_setaffinity_np(aid, sizeof(set), &set) != 0) {
+		static bool warned = false;
+		if (!warned) {
+			fprintf(stderr, "CMAES: warning - could not pin a thread to CPU %d\n", cpu);
+			warned = true;
+		}
+		return false;
+	}
+	return true;
+}
+
+// Milliseconds on CLOCK_MONOTONIC, truncated to 32 bits like an RTOS tick
+// counter (wraps after ~49.7 days; use differences, never absolute values).
+MAESTickType_t MAES_GetTickCount(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (MAESTickType_t)((uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u);
+}
+
+// Periodic wait on an absolute deadline, the equivalent of FreeRTOS
+// vTaskDelayUntil(): sleeps until *last_wake_ms + period_ms and advances
+// *last_wake_ms by exactly one period, so the loop period does not drift with
+// the time spent working. Unlike vTaskDelayUntil it does not catch up after an
+// overrun (or after the agent was suspended): when the deadline has already
+// passed it returns false at once and re-anchors *last_wake_ms to now, so a
+// late agent never fires a burst of back-to-back iterations.
+// Initialise *last_wake_ms with MAES_GetTickCount() before the first call.
+bool MAES_DelayUntil(MAESTickType_t* last_wake_ms, MAESTickType_t period_ms) {
+	MAES_CheckSuspend(MAES_GetCurrentTaskHandle());
+
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	uint64_t now64 = (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
+	MAESTickType_t next = *last_wake_ms + period_ms;
+	int32_t delta = (int32_t)(next - (MAESTickType_t)now64); // wrap-safe
+
+	if (delta <= 0) {
+		*last_wake_ms = (MAESTickType_t)now64;
+		return false;
+	}
+
+	uint64_t target64 = now64 + (uint64_t)delta;
+	struct timespec target;
+	target.tv_sec = (time_t)(target64 / 1000u);
+	target.tv_nsec = (long)(target64 % 1000u) * 1000000L;
+	while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &target, NULL) == EINTR) {
+		// interrupted by a signal: sleep again until the same deadline
+	}
+	*last_wake_ms = next;
+	return true;
 }
 
 // Identity checks used for admin-command authorization, replacing the
@@ -446,15 +530,15 @@ bool bootFunction(Agent_Platform* platform) {
 //Agent Initiate Function: This function creates a pthread for an agent, held at a start gate until it is registered.
 //Inputs: The Platform instance itself, the agent and the agent's behavior.
 //Outputs: None.
-void agent_initFunction(Agent_Platform* platform, MAESAgent* agent, void* behaviour) {
-	spawn_agent_thread(agent, (void (*)(void*))behaviour, NULL);
+void agent_initFunction(Agent_Platform* platform, MAESAgent* agent, void (*behaviour)(void*)) {
+	spawn_agent_thread(agent, behaviour, NULL);
 };
 
 //Agent Initiate with Parameters Function: This function creates a pthread for an agent. Also, it includes input parameters
 //Inputs: The Platform instance itself, the agent, the agent's behavior and its input parameters.
 //Outputs: None.
-void agent_initConParamFunction(Agent_Platform* platform, MAESAgent* agent, void* behaviour, void* pvParameters) {
-	spawn_agent_thread(agent, (void (*)(void*))behaviour, pvParameters);
+void agent_initConParamFunction(Agent_Platform* platform, MAESAgent* agent, void (*behaviour)(void*), void* pvParameters) {
+	spawn_agent_thread(agent, behaviour, pvParameters);
 };
 
 //Agent Search Function: This function searches for an agent in the platform.
@@ -522,9 +606,11 @@ Agent_info get_Agent_descriptionFunction(Agent_AID aid) {
 
 //Get Agent Platform Description Function: This function indicates the platform's description.
 //Inputs: The Platform instance itself.
-//Outputs: The description of the platform.
-AP_Description get_AP_descriptionFunction(Agent_Platform* platform) {
-	return platform->description;
+//Outputs: A pointer to the platform's description (the header always declared a
+//pointer; returning the struct by value through that pointer type was undefined
+//behaviour).
+AP_Description* get_AP_descriptionFunction(Agent_Platform* platform) {
+	return &platform->description;
 };
 
 //Register Agent Function: This function registers an agent into the platform.
@@ -635,7 +721,9 @@ ERROR_CODE kill_agentFunction(Agent_Platform* platform, Agent_AID aid) {
 
 			a->agent.aid = (Agent_AID)NULL;
 			env.erase_TaskEnv(&env,aid);
-			platform->description.subscribers--;
+			// No subscribers-- here: deregister_agent() above already removed the
+			// agent from Agent_Handle and decremented the count. Decrementing again
+			// made agent_search() miss the last registered agent after every kill.
 		}
 		return error;
 	}

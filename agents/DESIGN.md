@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document | ARQ-PE-003 — Agent architecture and LLC→HLC data path (draft) |
-| Version | v0.5 — 2026-10-05 (week 10). v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
+| Version | v0.6 — 2026-10-06 (week 10). v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
 | Covers | Deliverable "Documento de arquitectura multiagente y protocolo serial LLC-HLC" (OE2, OE4; milestone H2) and the design basis for the OE4/OE5/OE6 validation |
 | Sources | Thesis report *Olympus_pose_TFG.pdf* (ch. 1, 2.1.4–2.1.8, 3.1–3.4, 4); `requirements/DRT-SEP-001.md` v0.2; `requirements/ICD-PE-002.md` v1.0; LLC firmware v2.20 (`Alonso11/rover-low-level-controller`, `src/main.rs`); HLC image (`Alonso11/olympus-hlc-rpi5`, `olympus_hlc` v3.x, `rover_bridge`); CMAES pthreads port (`CMAES/libCMAES_pthreads`); simulation model v2.0 (`JorgeSchofield/olympus-pose-estimation-simulation`, folder `Simulation Model v2.0`) |
 | Status | Design only — no code yet. Section 17 lists the changes this design implies for the thesis report |
@@ -820,18 +820,19 @@ Unknown keys or missing required keys are a start-up error. The parsed set is wr
 
 | ID | Change | Why | Verification |
 |---|---|---|---|
-| L1 | Mailbox timed waits on **`CLOCK_MONOTONIC`** (`pthread_condattr_setclock`) | `CLOCK_REALTIME` jumps when the time is set at boot (no RTC battery) or by NTP, which breaks timeouts | Unit test: change the system time during a 1 s wait, timeout unaffected |
-| L2 | Add an **absolute-deadline wait** (`MAES_WaitUntil`, `clock_nanosleep(TIMER_ABSTIME)`) | `agent_wait` uses a relative `nanosleep`, so periodic loops drift (needed by the 50 Hz OE3 test and the LLC emulator) | Period jitter test |
-| L3 | Add **CPU affinity** (`MAES_SetAffinity(aid, cpu)`) | Thesis §3.4.5 relies on core pinning; the library has none | `/proc/<tid>/status` `Cpus_allowed_list` |
+| L1 | Mailbox timed waits on **`CLOCK_MONOTONIC`** | `CLOCK_REALTIME` jumps when the time is set at boot or by NTP | **Done (671bf4a)**; on-target check V-LIB-2 pending |
+| L2 | Absolute-deadline wait **`MAES_DelayUntil`** + `MAES_GetTickCount` | `agent_wait` drifts | **Done (671bf4a)**: no catch-up bursts after an overrun or a suspension; used by `rps_stress` |
+| L3 | CPU affinity **`MAES_SetAffinity(aid, cpu)`** | Thesis §3.4.5 relies on core pinning | **Done (671bf4a)**; check with V-LIB-3 on target |
 | L4 | ~~Fix `CMAES/CMakeLists.txt` path~~ — **done upstream** (current `main`); only the layer's `SRCREV` must follow (§15.4, Y2) | — | — |
-| L5 | Configurable AMS priority (default 46 instead of the maximum) | D10 | `chrt -p` |
-| L6 | Upstream bugs: `failure_identification` is wired to `failure_detectionFunction`; `MAX_RECEIVERS` lacks parentheses; `ConstructorUSER_DEF_COND` had no prototype in `CMAES.h` (§15.4, Y5; **fixed in 6358206**) | Latent defects; the missing prototype is an error from GCC 14 on | Code review + build without warnings and without the layer's `-Wno-error` flags |
+| L5 | Configurable AMS priority (`MAES_SetAMSPriority`, default 46); agents always below the AMS | D10 | **Done (671bf4a)** |
+| L6 | Header/implementation mismatches (27 `void*` → `void`), `get_AP_description` by-value return, double decrement in `kill_agent`, `failure_identification` wiring, `agent_init` taking `void*`, `MAX_RECEIVERS`, `ConstructorUSER_DEF_COND` prototype | Undefined behaviour; errors under GCC 14 | **Done (6358206, 671bf4a)**: strict C99, zero warnings under Clang 20; the recipe needs no `-Wno-error` flags any more |
 | L7 | (Optional, later) `MAES_QueueOverwrite` | Not needed with D2+D4 | — |
 | L8 | Keep: send/receive/AMS semantics unchanged | API compatibility with the FreeRTOS version | Existing demos |
 | L9 | ~~`install()` rules~~ — **done upstream**. `olympus-pose` builds the library with `add_subdirectory` from the same commit (§15.3), so it does not depend on them | — | — |
 
-After L1–L6, re-run the OE3 indicator: the 50 Hz rock-paper-scissors variant with 45 000
-messages, register/suspend/resume, and RSS stable.
+After L1–L6, re-run the OE3 indicator with `cmaes_rps_stress_demo 45000 20 3` (as root on the
+RPi 5): players at 50 Hz, AMS suspend/resume every round, checksummed payloads, RSS sampled
+after warm-up. Pass = exit code 0 and `RESULT : PASS`.
 
 ---
 
@@ -951,10 +952,10 @@ with disabled units. Required changes before the application work starts:
 | Y3 | Workarounds for problems already fixed upstream: the `sed` on `add_subdirectory`, the hand-written `do_install` | Dead code once Y2 is done | **Done (2aff319):** both removed; default `cmake` install plus `do_install:append` for the demo units. Verified that the upstream install rules produce exactly the four packaged files |
 | Y4 | README caveat 1 and the recipe comments reference `CHANGES.md` (changes 1–5), which is not in the repository | Unverifiable references; changes 4–5 (GCC 14 errors) are not traceable | Add `CHANGES.md` or fold its content into `CMAES/docs/README.md`; mark 1–3 as done |
 | Y5 | `ConstructorUSER_DEF_COND` was **not declared** in `CMAES.h` (thesis §3.1.5 says it was added) | Implicit function declaration in `Agent_Platform.c`: a warning on GCC 13, an error on GCC 14+ | **Done:** prototype added in `6358206`; `-Wno-error=implicit-function-declaration` and `=int-conversion` dropped from the recipe (neither is triggered any more). `=incompatible-pointer-types` stays for the 37 remaining `void`/`void*` constructor assignments (GCC 14 cleanup, not blocking on scarthgap) |
-| Y6 | `CMAES/README.md`, `Agent_Msg.c` and `rock_paper_scissors/Main.c` point to `docs/PORTING_NOTES.md`, which is now `docs/README.md` | Broken references in the deliverable | Update the references |
+| Y6 | References to `docs/PORTING_NOTES.md` (now `docs/README.md`) | Broken references | **Done (671bf4a)** |
 | Y7 | 84 build artefacts are committed under `CMAES/build/` (x86 binaries, `CMakeCache.txt` with an absolute path) | Clutter; a stale cache can confuse a local `cmake -B build` | Delete them and add `build/` to `.gitignore` |
 | Y8 | README caveat 2 says the image is sysvinit; the HLC decision log says systemd | The units may never run | Check `ps -p 1 -o comm=` on the board; the `olympus-pose` recipe ships both (§15.3) |
-| Y9 | The library builds as C11 (`CMAKE_C_STANDARD 11`); PE-RNF-007 asks for C99 | Inconsistent with the requirement as written | Try `-std=c99` together with L1–L6. If it compiles cleanly, switch; otherwise state in §3.1 that the library is C11 and the application C99 |
+| Y9 | Library built as C11; PE-RNF-007 asks for C99 | Inconsistent with the requirement | **Done (671bf4a)**: `CMAKE_C_STANDARD 99`, extensions off (`-std=c99`) |
 | Y10 | The local working folder was not a git checkout and was older than GitHub | — | **Done:** working clone at `…/Olympus-Pose-Estimation-System-TFG-TEC` (branch `master`, PRs into `main`) |
 
 Y1–Y3, Y5 and Y10 are done (2026-10-05). Y4, Y6–Y9 are hygiene and remain open.

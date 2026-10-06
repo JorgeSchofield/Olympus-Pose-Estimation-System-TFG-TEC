@@ -203,10 +203,33 @@ processes on Raspberry Pi OS typically lack `CAP_SYS_NICE`, so a failed
 `pthread_setschedparam` call is **not fatal**: it prints a one-time warning
 and the agent proceeds on the default `SCHED_OTHER` policy (priorities
 become advisory only). `MAES_RTPrioFor()` maps an agent's small ordinal
-priority into the RT range while reserving the top slot for the AMS;
-`MAES_AMSRTPrio()` puts the AMS there explicitly after the normal
+priority into the RT range (`min + priority`), always strictly below the
+AMS; `MAES_AMSRTPrio()` puts the AMS there explicitly after the normal
 registration path runs (which would otherwise map it through the same
 ordinal formula as everyone else).
+
+The AMS priority is `MAES_DEFAULT_AMS_PRIORITY` (46) unless
+`MAES_SetAMSPriority()` is called before `boot()`. It used to be the
+maximum (99). 46 keeps the whole platform below the kernel's threaded IRQ
+handlers (`SCHED_FIFO` 50), so the USB/serial interrupt threads that deliver
+sensor data are never starved by agents.
+
+### Real-time helpers (no FreeRTOS equivalent in the original API)
+
+- **Monotonic mailbox timeouts.** The `MAES_Queue` condition variables are
+  bound to `CLOCK_MONOTONIC` and deadlines are computed on that clock. With
+  `CLOCK_REALTIME`, setting the wall clock (at boot, the RPi 5 has no RTC
+  battery by default, or by NTP) stretched or cut short every pending
+  timeout.
+- **`MAES_DelayUntil(&last_wake_ms, period_ms)`** and
+  **`MAES_GetTickCount()`**: drift-free periodic loops on an absolute
+  `clock_nanosleep(TIMER_ABSTIME)` deadline, the equivalent of
+  `vTaskDelayUntil`. One deliberate difference: after an overrun (or a
+  suspension) it re-anchors to now instead of catching up, so a late agent
+  never fires a burst of back-to-back iterations. It is also a suspend
+  checkpoint, like `agent_wait`.
+- **`MAES_SetAffinity(aid, cpu)`**: pins an agent's thread to one CPU
+  (`pthread_setaffinity_np`); `cpu < 0` leaves it alone.
 
 ### `stackSize` is not applied
 
@@ -232,6 +255,35 @@ value:
   implemented as returning `Agent_AID`.
 - `Mailbox_Handle* (* get_mailbox)(Agent_Msg*, Agent_AID)` — same pattern,
   same fix, returning `Mailbox_Handle`.
+
+Further defects fixed in the second pass (October 2026, while preparing the
+OE3 indicator test). Clang 20 and GCC 14 reject several of them outright:
+
+- **27 method declarations returned `void*` while every implementation
+  returned `void`** (constructors, `setup`/`action`/`execute`, `agent_wait`,
+  `set_msg_type`, ...). Assigning a `void` function to a `void*` function
+  pointer is undefined behaviour and was the source of the ~37
+  `incompatible-pointer-types` warnings. The declarations now say `void`.
+  User code, which was always written with `void` functions, is unaffected.
+- **`get_AP_description`** was declared to return `AP_Description*` but the
+  implementation returned the struct by value: undefined behaviour at every
+  call. It now returns `&platform->description`.
+- **`kill_agent` decremented the subscriber count twice** (once in
+  `deregister_agent`, once itself), so after each kill `agent_search()` no
+  longer saw the last registered agent.
+- **`failure_identification` was wired to the detection function** in both
+  behaviour constructors; it now points to `failure_identificationFunction`.
+- **`ConstructorUSER_DEF_COND` had no prototype** (implicit declaration).
+- **`agent_init`/`agent_initConParam` took the behaviour as `void*`**;
+  ISO C does not allow converting a function pointer to `void*`. They now
+  take `void (*)(void*)`, which is what every caller passes.
+- `MAX_RECEIVERS` gained parentheses; the `USER_DEF_COND` callbacks are
+  declared `(void)` instead of `()`.
+- `install()` rules were placed before `add_library()`, so CMake refused to
+  configure the project at all.
+
+With these fixes the library builds as **strict C99** (`-std=c99`, required
+by PE-RNF-007 for the HLC code) with no warnings, also under Clang 20.
 
 ## 5. Known limitations
 

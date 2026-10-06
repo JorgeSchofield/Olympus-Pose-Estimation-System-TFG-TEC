@@ -44,7 +44,7 @@ typedef void (*MAESTaskFunction_t)(void*);
 #define Agent_AID MAESTaskHandle_t		             // Agent ID
 #define Mailbox_Handle MAESQueueHandle_t            // Agent's Mailbox Handle
 #define AGENT_LIST_SIZE 64					        // Maximum Agents per platform
-#define MAX_RECEIVERS AGENT_LIST_SIZE - 1        	// Maximum receivers available for any agent
+#define MAX_RECEIVERS (AGENT_LIST_SIZE - 1)       	// Maximum receivers available for any agent
 #define BEHAVIOUR_LIST_SIZE 8				        //
 #define ORGANIZATIONS_SIZE 16				         // Maximum Members for org
 
@@ -197,7 +197,7 @@ typedef void (*MAESTaskFunction_t)(void*);
 		Agent_resources resources;
 
 		//Methods
-		void* (*Iniciador)(MAESAgent*,const char* ,MAESUBaseType_t ,uint16_t );
+		void (*Iniciador)(MAESAgent*,const char* ,MAESUBaseType_t ,uint16_t );
 		// NOTE: declared Agent_AID* in the original FreeRTOS header, but the
 		// implementation always returned a bare Agent_AID - harmless there
 		// only because xTaskHandle is itself a pointer typedef. On pthreads,
@@ -221,8 +221,8 @@ typedef void (*MAESTaskFunction_t)(void*);
 
 		//Methods
 		MAESAgent* (* get_taskEnv)(sysVars*,Agent_AID aid);
-		void* (*set_TaskEnv)(sysVars*, Agent_AID aid, MAESAgent* agent_ptr);
-		void* (* erase_TaskEnv)(sysVars*,Agent_AID aid);
+		void (*set_TaskEnv)(sysVars*, Agent_AID aid, MAESAgent* agent_ptr);
+		void (* erase_TaskEnv)(sysVars*,Agent_AID aid);
 		sysVar* (*getEnv)(sysVars*);
 	};
 
@@ -248,16 +248,16 @@ typedef void (*MAESTaskFunction_t)(void*);
 		// only because xQueueHandle is itself a pointer typedef. Declared
 		// correctly here as Mailbox_Handle to match real usage.
 		Mailbox_Handle (* get_mailbox)(Agent_Msg*,Agent_AID aid);
-		void* (*Agent_Msg)(Agent_Msg*);
+		void (*Agent_Msg)(Agent_Msg*);
 		ERROR_CODE (*add_receiver)(Agent_Msg*,Agent_AID aid_receiver);
 		ERROR_CODE (*remove_receiver)(Agent_Msg*,Agent_AID aid_receiver);
-		void* (*clear_all_receiver)(Agent_Msg*);
-		void* (*refresh_list)(Agent_Msg*);
+		void (*clear_all_receiver)(Agent_Msg*);
+		void (*refresh_list)(Agent_Msg*);
 		MSG_TYPE (*receive)(Agent_Msg*,MAESTickType_t timeout);
 		ERROR_CODE (*send)(Agent_Msg*,Agent_AID aid_receiver, MAESTickType_t timeout);
 		ERROR_CODE (*send0)(Agent_Msg*);
-		void* (*set_msg_type)(Agent_Msg*,MSG_TYPE type);
-		void* (*set_msg_content)(Agent_Msg*,char* body);
+		void (*set_msg_type)(Agent_Msg*,MSG_TYPE type);
+		void (*set_msg_content)(Agent_Msg*,char* body);
 		MsgObj* (*get_msg)(Agent_Msg*);
 		MSG_TYPE (*get_msg_type)(Agent_Msg*);
 		char* (*get_msg_content)(Agent_Msg*);
@@ -277,12 +277,12 @@ typedef void (*MAESTaskFunction_t)(void*);
 	struct USER_DEF_COND {
 
 		//Methods
-		bool (*register_cond)();
-		bool (*deregister_cond)();
-		bool (*suspend_cond)();
-		bool (*kill_cond)();
-		bool (*resume_cond)();
-		bool (*restart_cond)();
+		bool (*register_cond)(void);
+		bool (*deregister_cond)(void);
+		bool (*suspend_cond)(void);
+		bool (*kill_cond)(void);
+		bool (*resume_cond)(void);
+		bool (*restart_cond)(void);
 	};
 
 // Class: Agent Platform//
@@ -302,16 +302,16 @@ typedef void (*MAESTaskFunction_t)(void*);
 		Agent_AID setup_thread; // pthreads backend only: thread that built the platform (see Agent_Platform.c)
 
 		//Methods
-		void* (*Agent_Platform)(Agent_Platform* platform,const char* name);
-		void* (*Agent_PlatformWithCond)(Agent_Platform* platform, const char* name,
+		void (*Agent_Platform)(Agent_Platform* platform,const char* name);
+		void (*Agent_PlatformWithCond)(Agent_Platform* platform, const char* name,
 			USER_DEF_COND* user_cond);
 		bool (*boot)(Agent_Platform* platform);
-		void* (*agent_init)(Agent_Platform* platform, MAESAgent* agent, void* behaviour);
-		void* (*agent_initConParam)(Agent_Platform* platform, MAESAgent* agent,
-			void behaviour(void* pvParameters), void* pvParameters);
+		void (*agent_init)(Agent_Platform* platform, MAESAgent* agent, void (*behaviour)(void*));
+		void (*agent_initConParam)(Agent_Platform* platform, MAESAgent* agent,
+			void (*behaviour)(void* pvParameters), void* pvParameters);
 		bool (*agent_search)(Agent_Platform* platform, Agent_AID aid);
-		void* (* agent_wait)(Agent_Platform* platform, MAESTickType_t ticks);
-		void* (*agent_yield)(Agent_Platform* platform);
+		void (* agent_wait)(Agent_Platform* platform, MAESTickType_t ticks);
+		void (*agent_yield)(Agent_Platform* platform);
 		Agent_AID (*get_running_agent)(Agent_Platform* platform);
 		AGENT_MODE (*get_state)(Agent_Platform* platform, Agent_AID aid);
 		Agent_info (*get_Agent_description)(Agent_AID aid);
@@ -321,7 +321,7 @@ typedef void (*MAESTaskFunction_t)(void*);
 		ERROR_CODE (*kill_agent)(Agent_Platform* platform, Agent_AID aid);
 		ERROR_CODE (*suspend_agent)(Agent_Platform* platform, Agent_AID aid);
 		ERROR_CODE (*resume_agent)(Agent_Platform* platform, Agent_AID aid);
-		void* (*restart)(Agent_Platform* platform, Agent_AID aid);
+		void (*restart)(Agent_Platform* platform, Agent_AID aid);
 	};
 
 	extern Agent_Platform Platform;
@@ -346,13 +346,13 @@ typedef void (*MAESTaskFunction_t)(void*);
 		Agent_Msg* msg;
 
 		//Methods
-		void* (* action)(CyclicBehaviour* Behaviour, void* pvParameters);
-		void* (*setup)(CyclicBehaviour* Behaviour, void* pvParameters);
+		void (* action)(CyclicBehaviour* Behaviour, void* pvParameters);
+		void (*setup)(CyclicBehaviour* Behaviour, void* pvParameters);
 		bool (*done)(CyclicBehaviour* Behaviour, void* pvParameters);
 		bool (*failure_detection)(CyclicBehaviour* Behaviour, void* pvParameters);
-		void* (*failure_identification)(CyclicBehaviour* Behaviour, void* pvParameters);
-		void* (*failure_recovery)(CyclicBehaviour* Behaviour, void* pvParameters);
-		void* (*execute)(CyclicBehaviour* Behaviour, void* pvParameters);
+		void (*failure_identification)(CyclicBehaviour* Behaviour, void* pvParameters);
+		void (*failure_recovery)(CyclicBehaviour* Behaviour, void* pvParameters);
+		void (*execute)(CyclicBehaviour* Behaviour, void* pvParameters);
 	};
 
 
@@ -366,13 +366,13 @@ typedef void (*MAESTaskFunction_t)(void*);
 		Agent_Msg* msg;
 
 		//Methods
-		void* (*action)(OneShotBehaviour* Behaviour, void* pvParameters);
-		void* (*setup)(OneShotBehaviour* Behaviour, void* pvParameters);
+		void (*action)(OneShotBehaviour* Behaviour, void* pvParameters);
+		void (*setup)(OneShotBehaviour* Behaviour, void* pvParameters);
 		bool (*done)(OneShotBehaviour* Behaviour, void* pvParameters);
 		bool (*failure_detection)(OneShotBehaviour* Behaviour, void* pvParameters);
-		void* (*failure_identification)(OneShotBehaviour* Behaviour, void* pvParameters);
-		void* (*failure_recovery)(OneShotBehaviour* Behaviour, void* pvParameters);
-		void* (*execute)(OneShotBehaviour* Behaviour, void* pvParameters);
+		void (*failure_identification)(OneShotBehaviour* Behaviour, void* pvParameters);
+		void (*failure_recovery)(OneShotBehaviour* Behaviour, void* pvParameters);
+		void (*execute)(OneShotBehaviour* Behaviour, void* pvParameters);
 	};
 
 	//Class: Agent Organization//
@@ -385,7 +385,7 @@ typedef void (*MAESTaskFunction_t)(void*);
 		org_info description;
 
 		//Methods
-		void* (*Agent_Organization)(Agent_Organization* Organization,ORG_TYPE organization_type);
+		void (*Agent_Organization)(Agent_Organization* Organization,ORG_TYPE organization_type);
 		ERROR_CODE (*create)(Agent_Organization* Organization);
 		ERROR_CODE (*destroy)(Agent_Organization* Organization);
 		ERROR_CODE (*isMember)(Agent_Organization* Organization,Agent_AID aid);
@@ -397,7 +397,7 @@ typedef void (*MAESTaskFunction_t)(void*);
 		ERROR_CODE (*kick_agent)(Agent_Organization* Organization, Agent_AID aid);
 		ERROR_CODE (*ban_agent)(Agent_Organization* Organization, Agent_AID aid);
 		ERROR_CODE (*remove_ban)(Agent_Organization* Organization, Agent_AID aid);
-		void* (*clear_ban_list)(Agent_Organization* Organization);
+		void (*clear_ban_list)(Agent_Organization* Organization);
 		ERROR_CODE (*set_participan)(Agent_Organization* Organization, Agent_AID aid);
 		ERROR_CODE (*set_visitor)(Agent_Organization* Organization, Agent_AID aid);
 		ORG_TYPE (*get_org_type)(Agent_Organization* Organization);
@@ -442,5 +442,24 @@ typedef void (*MAESTaskFunction_t)(void*);
 	// execute() loops and from agent_wait(). See the plan's note on suspend
 	// being cooperative (not preemptive) under pthreads.
 	void MAES_CheckSuspend(Agent_AID aid);
+
+	// Real-time scheduling helpers (pthreads backend only).
+	// The AMS runs at SCHED_FIFO MAES_DEFAULT_AMS_PRIORITY unless changed with
+	// MAES_SetAMSPriority() before boot(); agents are always mapped below it.
+	// 46 keeps the whole platform under the kernel's threaded IRQ handlers (50).
+#define MAES_DEFAULT_AMS_PRIORITY 46
+	void MAES_SetAMSPriority(int rt_priority);
+
+	// Pins a thread (an agent's AID) to one CPU; cpu < 0 does nothing.
+	// Returns false, with a one-time warning, if the kernel refuses.
+	bool MAES_SetAffinity(Agent_AID aid, int cpu);
+
+	// Monotonic millisecond tick, 32-bit like an RTOS tick counter.
+	MAESTickType_t MAES_GetTickCount(void);
+
+	// Drift-free periodic wait (vTaskDelayUntil equivalent, without catch-up
+	// bursts after an overrun). Returns false if the deadline had already
+	// passed. Also a suspend checkpoint, like agent_wait().
+	bool MAES_DelayUntil(MAESTickType_t* last_wake_ms, MAESTickType_t period_ms);
 
 #endif // CMAES_H
