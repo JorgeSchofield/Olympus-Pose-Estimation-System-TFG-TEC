@@ -415,6 +415,9 @@ typedef void (*MAESTaskFunction_t)(void*);
 	void ConstructorCyclicBehaviour(CyclicBehaviour* Behaviour);
 	void ConstructorOneShotBehaviour(OneShotBehaviour* Behaviour);
 	void ConstructorAgent_Organization(Agent_Organization* Organization, sysVars* env);
+	// Not declared in the original header either; Agent_Platform.c calls it, which
+	// is an implicit function declaration (a hard error from GCC 14 on).
+	void ConstructorUSER_DEF_COND(USER_DEF_COND* cond);
 
 
 	/*******************************************************

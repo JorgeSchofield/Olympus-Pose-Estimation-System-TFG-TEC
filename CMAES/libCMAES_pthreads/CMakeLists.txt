@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 project(cmaes_pthreads C)
 include(GNUInstallDirs)
-install(TARGETS cmaes_pthreads ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-install(FILES include/CMAES.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cmaes)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -27,3 +25,9 @@ target_link_libraries(cmaes_pthreads PUBLIC Threads::Threads)
 # pthread_cancel/pthread_setschedparam and friends are GNU/POSIX extensions
 # not exposed under the default strict-ISO feature test macros.
 target_compile_definitions(cmaes_pthreads PUBLIC _GNU_SOURCE)
+
+# install(TARGETS) must come after add_library: CMake looks the target up when
+# the install() command runs and fails with "given target ... which does not
+# exist" if it has not been created yet.
+install(TARGETS cmaes_pthreads ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(FILES include/CMAES.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cmaes)
