@@ -1,12 +1,11 @@
-# Adds the CMAES demos to the rover image for bring-up.
+# Adds the pose-estimation subsystem to the rover image:
+#   olympus-pose         the CMAES agents, /etc/olympus-pose/pose.conf, tools
+#   olympus-pose-llcmux  the LLC link multiplexer (starts at boot, S90)
 #
-# Bring-up only. Once the Pose Estimation agent application exists, replace
-# "cmaes-demos" with the application package and drop the demos: they run
-# forever and print continuously, which is not something the flight image
-# should ship.
+# The CMAES demos (cmaes-demos) are no longer installed: the OE3 indicator was
+# closed on 2026-10-07. Add " cmaes-demos" back to repeat that test.
 #
-# If you would rather not modify the rover image at all, delete this file and
-# put the same line in build/conf/local.conf instead — the effect is
-# identical and it leaves the rover layer untouched.
+# If you would rather not modify the rover image recipe, delete this file and
+# put the same line in build/conf/local.conf instead.
 
-IMAGE_INSTALL:append = " cmaes-demos"
+IMAGE_INSTALL:append = " olympus-pose olympus-pose-llcmux"

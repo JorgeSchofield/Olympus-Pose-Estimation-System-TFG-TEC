@@ -1,0 +1,65 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          olympus-pose
+# Required-Start:    $local_fs llcmux
+# Required-Stop:     $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Olympus pose estimation (CMAES agents, agents/DESIGN.md)
+### END INIT INFO
+#
+# Restarted automatically if it exits, except on a configuration error (exit
+# code 1), which retrying cannot fix: check it with
+#   olympus-pose -c /etc/olympus-pose/pose.conf --check
+# Console output goes to /var/log/olympus-pose.console.log; the run logs are in
+# /var/lib/olympus-pose/runs/<run>/ (persistent; /var/log is in RAM). Options in /etc/default/olympus-pose.
+
+NAME=olympus-pose
+DAEMON=/usr/bin/olympus-pose
+PIDFILE=/run/olympus-pose.pid
+LOG=/var/log/olympus-pose.console.log
+POSE_ARGS="-c /etc/olympus-pose/pose.conf"
+[ -r /etc/default/olympus-pose ] && . /etc/default/olympus-pose
+
+[ -x "$DAEMON" ] || exit 0
+
+running() {
+	[ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+start() {
+	if running; then
+		echo "$NAME already running"
+		return 0
+	fi
+	echo "Starting $NAME"
+	(
+		trap 'exit 0' TERM
+		while true; do
+			$DAEMON $POSE_ARGS >>"$LOG" 2>&1
+			rc=$?
+			[ $rc -eq 1 ] && { echo "$(date) configuration error, not restarting" >>"$LOG"; exit 1; }
+			sleep 1
+		done
+	) </dev/null &
+	echo $! >"$PIDFILE"
+}
+
+stop() {
+	echo "Stopping $NAME"
+	if running; then
+		kill -TERM "$(cat "$PIDFILE")" 2>/dev/null
+	fi
+	killall -TERM $NAME 2>/dev/null   # clean shutdown: logs are flushed and synced
+	rm -f "$PIDFILE"
+	sleep 1
+}
+
+case "$1" in
+start) start ;;
+stop) stop ;;
+restart) stop; start ;;
+status) if running; then echo "$NAME running"; else echo "$NAME stopped"; exit 3; fi ;;
+*) echo "Usage: $0 {start|stop|restart|status}"; exit 1 ;;
+esac
+exit 0

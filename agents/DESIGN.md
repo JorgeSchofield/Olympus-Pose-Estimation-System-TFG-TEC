@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document | ARQ-PE-003 — Agent architecture and LLC→HLC data path (draft) |
-| Version | v0.6 — 2026-10-06 (week 10). v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
+| Version | v0.8 — 2026-10-08 (week 10). v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
 | Covers | Deliverable "Documento de arquitectura multiagente y protocolo serial LLC-HLC" (OE2, OE4; milestone H2) and the design basis for the OE4/OE5/OE6 validation |
 | Sources | Thesis report *Olympus_pose_TFG.pdf* (ch. 1, 2.1.4–2.1.8, 3.1–3.4, 4); `requirements/DRT-SEP-001.md` v0.2; `requirements/ICD-PE-002.md` v1.0; LLC firmware v2.20 (`Alonso11/rover-low-level-controller`, `src/main.rs`); HLC image (`Alonso11/olympus-hlc-rpi5`, `olympus_hlc` v3.x, `rover_bridge`); CMAES pthreads port (`CMAES/libCMAES_pthreads`); simulation model v2.0 (`JorgeSchofield/olympus-pose-estimation-simulation`, folder `Simulation Model v2.0`) |
 | Status | Design only — no code yet. Section 17 lists the changes this design implies for the thesis report |
@@ -131,7 +131,7 @@ the pose (PE-RF-013, OE2).
 | Item | Value | Consequence |
 |---|---|---|
 | Kernel | Mainline RPi kernel, **not PREEMPT_RT**; `CONFIG_CPU_FREQ_DEFAULT_GOV_POWERSAVE=y`, `arm_freq=1500` | Wake-up latency is the risk, not compute. Measure before tuning (§10.3) |
-| Init | **Unconfirmed.** The configuration in the HLC repository gives **sysvinit**: `local.conf` sets no `INIT_MANAGER`, and poky scarthgap defaults to `POKY_INIT_MANAGER = "sysvinit"`. The `meta-olympus-pose` README agrees. The HLC decision log (2026-03-18) says the opposite ("Scarthgap usa systemd por defecto"), and some rover recipes ship only systemd units. Check on the board with `ps -p 1 -o comm=`. `olympus_hlc` is launched by hand (`python3 -m olympus_hlc --mode … [--port …]`) | `llcmux` and `olympus-pose` ship **both** a SysV init script and a systemd unit (`inherit update-rc.d systemd`), so they start whichever init the image uses. `llcmux` sets its own priority and affinity in code instead of relying on unit options |
+| Init | **sysvinit**, confirmed on the board (2026-10-07). The HLC decision log saying systemd is outdated: `local.conf` sets no `INIT_MANAGER` and poky scarthgap defaults to sysvinit. `olympus_hlc` is launched by hand (`python3 -m olympus_hlc --mode … [--port …]`) | `llcmux` and `olympus-pose` ship sysvinit scripts that restart the daemon if it exits. `llcmux` sets its own priority and affinity in code |
 | Privileges | `debug-tweaks`, root login | `SCHED_FIFO` (CAP_SYS_NICE) available when run as root |
 | Toolchain | No compiler in the image | Build with a Yocto recipe or the Yocto SDK (§15.3) |
 | CPU load | YOLOv8n-seg vision on the same SoC | The pose threads run at real-time priority, pinned (§10) |
@@ -834,6 +834,11 @@ After L1–L6, re-run the OE3 indicator with `cmaes_rps_stress_demo 45000 20 3` 
 RPi 5): players at 50 Hz, AMS suspend/resume every round, checksummed payloads, RSS sampled
 after warm-up. Pass = exit code 0 and `RESULT : PASS`.
 
+**Result (2026-10-07, RPi 5 with the Olympus image, CPU 3):** PASS. 45 000 messages in 450.0 s
+(100 msg/s), 22 499 rounds with 44 998 suspends and resumes each; 0 sequence gaps, 0 duplicates,
+0 bad checksums, 0 send failures, 0 AMS errors, 0 suspend or receive timeouts; RSS 1712 kB at
+baseline and at the end (growth 0 kB). **OE3 indicator met; milestone H3 closed.**
+
 ---
 
 ## 15. Code organisation, build and deployment
@@ -922,15 +927,13 @@ reported, not edited.
   So **no file in `olympus-hlc-rpi5` changes at all**; removing the layer from
   `bblayers.conf` restores the original rover image. The recipe installs:
   - `/usr/bin/olympus-pose`, `/usr/bin/llcmux`, `/etc/olympus-pose/pose.conf`;
-  - **for sysvinit** (what the repository configuration gives, §3.5): init scripts
-    `llcmux` (start priority 90, before any manual `olympus_hlc` launch) and
-    `olympus-pose` (91), each relaunching its daemon if it exits;
-  - **for systemd** (if the board turns out to use it): `llcmux.service` (`Restart=always`)
-    and `olympus-pose.service` (`Wants=`/`After=llcmux.service`, `Restart=on-failure`,
-    `LimitRTPRIO=50`, `LimitMEMLOCK=infinity`).
+  - sysvinit scripts (the image is sysvinit, §3.5): `llcmux` (start priority 90, before
+    any manual `olympus_hlc` launch) and `olympus-pose` (91), each relaunching its daemon
+    if it exits, except on a configuration error;
+  - `/etc/default/llcmux` (options, e.g. `--record-dir`).
 
-  The classes install whichever matches `DISTRO_FEATURES`. In both cases `llcmux` and the
-  agents set their own `SCHED_FIFO` priority and CPU affinity in code (§10.1), and `llcmux`
+  `llcmux` and the agents set their own `SCHED_FIFO` priority and CPU affinity in code
+  (§10.1), and `llcmux`
   waits for `/dev/arduino_mega_hw` itself (§6, rule 5), so nothing depends on init-specific
   features. This is additive to the image; `python3-rover-bridge` and `olympus_hlc` are
   not modified.
@@ -1255,7 +1258,7 @@ alternatives raised during the design, including the adviser's, are on record:
 
 | ID | Item | Needed for | Proposed action |
 |---|---|---|---|
-| S-1 | **Spike:** confirm `rover_bridge` works through a pty. Run `tools/spike_pty_check.py` on the rover as root; it uses a fake LLC and never touches the real port | D1 | First task; if it fails, fall back to a tee hook in `rover_bridge` (needs owner approval) |
+| S-1 | ~~Spike: `rover_bridge` through a pty~~ — **passed** (2026-10-07, v2 of `tools/spike_pty_check.py` with the fake LLC in its own process): open, command round trip, telemetry and exclusive lock all work through a pty | D1 | — |
 | Q-1 | ~~pty naming~~ — **closed:** udev rename (from the pose layer, via `.bbappend`) + `llcmux` publishes `/dev/arduino_mega` (§3.2, §15.3, D13) | — | Inform the owner of `olympus-hlc-rpi5`; that repository is not edited |
 | Q-2 | ~~Model files missing~~ — **closed:** `Simulation Model v2.0` reviewed; changes listed in §9.4 and §17.14 | — | — |
 | Q-3 | ~~Hand-written vs generated~~ — **closed:** MATLAB Coder from the unchanged core files + two wrappers (D14); MATLAB and MATLAB Coder licenses confirmed (2026-10-05) | — | — |
@@ -1266,3 +1269,31 @@ alternatives raised during the design, including the adviser's, are on record:
 | R-2 | Counts-per-revolution anomaly (Hall bounce) | λ, `rate_max_counts_s`, rest detection (bounce would prevent `STILL`) | V-CAL-1; inspect counts while stationary |
 | R-3 | Tail latency on a non-RT kernel with vision load and the powersave governor | OE5 | V-OE5-1 first; then optional `isolcpus`/governor (§10.1) |
 | R-4 | IMU failure stops all frames (fw v2.20) | DRT PE-RNF-009 | Report as a limitation, or propose sending the frame with an `imu_ok` field in a future firmware |
+
+---
+
+## 19. Implementation status (2026-10-08)
+
+| Component | Where | Verified so far | Still to verify on target |
+|---|---|---|---|
+| Fusion / estimation core | Simulation repo, branch `step3-model`: `sep_fusion_step`, `sep_estimation_step` (+ init, message); generated into `agents/src/core/gen` by `codegen_hlc_core.m` | 13/13 model tests; full UMBmark results identical to the previous model; Simulink = MATLAB; generated C = MATLAB on 2591 frames (zero difference); strict C99 for aarch64 | — |
+| Parameters | `export_pose_conf.m` → section 1 of `agents/config/pose.conf` | Parser tests; equivalence test runs from the shipped file | — |
+| Agents + supervisor | `agents/src` | Cross-compiled for aarch64 with `-std=c99 -Wall -Wextra -Werror`; core unit tests (68 checks incl. parser fuzz) | Replay, 15 min live delivery test (V-OE4-1/2), latency (V-OE5-1) |
+| `llcmux` | `agents/tools/llcmux` | Cross-compiled | RAW filtering with `olympus_hlc`, DTR reset on open, reconnect (V-OE5-4/5) |
+| Emulator and tools | `agents/tools` | Emulated UMBmark replayed in MATLAB: distance exact (8.000 m), square closes to 1.65 % | Live pty mode on the RPi |
+| Yocto | `meta-olympus-pose/recipes-pose/olympus-pose`, udev bbappend, image bbappend | — | `bitbake olympus-pose`, boot with `llcmux` |
+
+Implementation choices not in the earlier sections:
+
+- **Run logs** go to `/var/lib/olympus-pose/runs/<run>/`: `/var/log` is a tmpfs on poky
+  images, so test logs there would not survive a reboot.
+- **Replay mode** (`olympus-pose -r file`) sends with `MAES_MAX_DELAY` and the log writer
+  blocks instead of dropping, so a recorded run is processed completely and reproducibly.
+  Latency columns are not meaningful in replay.
+- **Model default:** `sim_params` keeps `est_policy = 'periodic'` so the thesis figures stay
+  reproducible; the application is event-driven (D3), which in the model gives the same
+  accuracy and a lower latency (p95 16.9 ms against 27.9 ms).
+- **`ag.dt_reject`** rose from 0.5 s to 2.0 s: with cumulative messages a 2 s hole carries its
+  exact distance and is sub-stepped (§9.2); longer jumps are treated as a corrupted tick.
+- **Slip threshold:** `slip_thresh` stays at the model value (0.10 rad/s) until LLC and HLC
+  are tested together (§9.4).
