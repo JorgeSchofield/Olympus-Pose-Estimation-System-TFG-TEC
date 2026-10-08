@@ -81,6 +81,10 @@ static void fus_action(CyclicBehaviour* b, void* arg)
 	m->rejects = (uint32_t)fst.n_reject;
 	m->rerefs = (uint32_t)fst.n_reref;
 	m->llc_resets = (uint32_t)fst.n_llc_reset;
+	m->imu_bad_frames = in.imu_bad_frames;
+	m->temp_raw = in.temp_raw;
+	m->frame_version = in.frame_version;
+	m->llc_tick = in.llc_tick;
 	m->producer_drops = drops;
 
 	if (pe_send(b->msg, ag_est.AID(&ag_est), m, INFORM, pe_send_timeout())) {

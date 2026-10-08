@@ -56,7 +56,7 @@ static void handle_pose(const pe_pose_msg_t* p)
 		last_llc_reset_t_cum = p->t_cum_ms;
 	}
 	if (!(p->status & PE_ST_STALE)) {
-		pe_clockfit_add(&clockfit, p->t_llc_ms, p->hdr.t_rx_ns);
+		pe_clockfit_add(&clockfit, p->llc_tick, p->hdr.t_rx_ns);
 	}
 
 	if (++decim >= (uint32_t)g_params.pose_decimation) {
@@ -73,15 +73,16 @@ static void handle_pose(const pe_pose_msg_t* p)
 		"%.6f,%.6f,%.6f,%.6f,%.7f,"
 		"%.4e,%.4e,%.4e,%.4e,%.4e,%.4e,"
 		"%.6f,%.6f,%.3f,%.3f,%.3f,"
-		"%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+		"%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%.2f,%u\n",
 		(unsigned long long)now, (unsigned long long)p->hdr.t_rx_ns, (unsigned long long)p->t_est_ns,
-		p->t_llc_ms, p->t_cum_ms, p->mode, p->status,
+		p->llc_tick, p->t_cum_ms, p->mode, p->status,
 		p->x[0], p->x[1], p->x[2], p->x[3], p->x[4],
 		p->P[0], p->P[6], p->P[1], p->P[12], p->P[18], p->P[24],
 		p->s_m, p->diag[0], p->diag[1], p->diag[2], lat_ms,
 		p->link_acq.delivered, p->link_acq.lost, p->link_acq.max_consec_lost, p->link_acq.producer_drops,
 		p->link_fus.delivered, p->link_fus.lost, p->link_fus.max_consec_lost, p->link_fus.producer_drops,
-		p->frames_ok, p->frames_bad, p->rejects, p->n_substeps, p->n_gaps);
+		p->frames_ok, p->frames_bad, p->rejects, p->n_substeps, p->n_gaps, p->imu_bad_frames,
+		p->frame_version == 3 ? p->temp_raw / 333.87 + 21.0 : 0.0, p->frame_version);
 	last_pose = *p;
 }
 

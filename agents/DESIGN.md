@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document | ARQ-PE-003 — Agent architecture and LLC→HLC data path (draft) |
-| Version | v0.8 — 2026-10-08 (week 10). v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
+| Version | v0.9 — 2026-10-08 (week 10). v0.9: LLC firmware v3.0 (MPU-9250 driver, `RAW:` frame with `temp` and `imu_ok`, always emitted) supported next to v2.20 (§3.1.1); `est.dt_source` implemented after measuring the LLC clock scale k ≈ 1.87 on the v3.0 captures (§10.4); capture→replay converter, emulator v3/IMU-loss/slow-clock modes. v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
 | Covers | Deliverable "Documento de arquitectura multiagente y protocolo serial LLC-HLC" (OE2, OE4; milestone H2) and the design basis for the OE4/OE5/OE6 validation |
 | Sources | Thesis report *Olympus_pose_TFG.pdf* (ch. 1, 2.1.4–2.1.8, 3.1–3.4, 4); `requirements/DRT-SEP-001.md` v0.2; `requirements/ICD-PE-002.md` v1.0; LLC firmware v2.20 (`Alonso11/rover-low-level-controller`, `src/main.rs`); HLC image (`Alonso11/olympus-hlc-rpi5`, `olympus_hlc` v3.x, `rover_bridge`); CMAES pthreads port (`CMAES/libCMAES_pthreads`); simulation model v2.0 (`JorgeSchofield/olympus-pose-estimation-simulation`, folder `Simulation Model v2.0`) |
 | Status | Design only — no code yet. Section 17 lists the changes this design implies for the thesis report |
@@ -67,6 +67,20 @@ Findings from reading `src/main.rs` and `src/sensors/mpu6050.rs`:
 | Timing inside the cycle | Encoders are read in the stall block, IMU read separately; both go out in the same frame | As modelled in §3.3.2 of the thesis |
 | Length | ≤ 82 bytes incl. `\n`; no checksum | Syntax check in acquisition, physical plausibility checks in fusion (§7.2) |
 | Link load | ≈ 82 B × 10 bit × 50 Hz ≈ 41 kbit/s ≈ 36 % of 115 200 baud, plus TLM | Acceptable; on the LLC this costs ≈ 7 ms of blocking TX per cycle (OE2 firmware topic) |
+
+#### 3.1.1 Firmware v3.0 frame (MPU-9250 driver, captures of 2026-10-06)
+
+```
+RAW:<tick>:<ax>:<ay>:<az>:<gx>:<gy>:<gz>:<encL>:<encR>:<temp>:<imu_ok>\n
+```
+
+| Item | v3.0 | Consequence for the HLC |
+|---|---|---|
+| Fields | Two fields **appended**: `temp` (int16, MPU-9250 die temperature, °C = temp/333.87 + 21) and `imu_ok` (0/1) | Acquisition accepts 9 (v2.20) or 11 fields (v3.0); a v2.20 frame is taken as `imu_ok = 1`. The version is carried in every message and logged (`frame_version`) |
+| Emission condition | **Always** emitted; with `imu_ok = 0` the six inertial fields are 0 | The odometry-only fallback of §13 (`IMU_INVALID`) is now reachable; `imu_bad_frames` counts these frames |
+| IMU | New MPU-9250 driver: gyro ±250 °/s (131 LSB/(°/s)), accel ±2 g, DLPF 10 Hz, WHO_AM_I 0x71/0x73 | `ag.gyro_scale` unchanged. The 10 Hz DLPF adds ≈ 15–20 ms of gyro group delay (to be checked against the model's 44 Hz) |
+| `tick` | Still +20 per loop iteration; measured real period ≈ 37 ms (26.7 Hz), **k ≈ 1.87** | With `dt_source = 0` the estimator's Δt is 53 % of the real one; see §10.4 |
+| Temperature | Sent, logged (`imu_temp_c` in `pose.csv`) | Closes ICD issue A-02 on the data side; a bias-vs-temperature model is not part of this version |
 
 ### 3.2 The serial port is owned exclusively by `olympus_hlc`
 
@@ -278,9 +292,9 @@ Steps:
    up to the next `\n` (counted `frames_bad`).
 2. Parse the optional `@<t_rx_ns>` prefix. If absent (direct serial or bench use), stamp
    `CLOCK_MONOTONIC` locally and set `RX_TS_LOCAL`.
-3. Accept only `RAW:`. Require exactly 9 numeric fields after the prefix, base-10, no
-   trailing characters, `tick` within uint32, IMU fields within int16, encoders within
-   int32. Any violation → discard and count. No physical plausibility checks here: those
+3. Accept only `RAW:`. Require exactly 9 (v2.20) or 11 (v3.0, §3.1.1) numeric fields
+   after the prefix, base-10, no trailing characters, `tick` within uint32, IMU fields and
+   `temp` within int16, encoders within int32, `imu_ok` 0 or 1. Any violation → discard and count. No physical plausibility checks here: those
    belong in fusion.
 4. Fill the next free buffer, `hdr.seq = ++seq`, and send with timeout 0. On failure,
    count `drops_out` and **keep the same buffer** for the next frame.
@@ -715,9 +729,20 @@ tail-latency problem. They are image changes and must be agreed with the rover's
 `llcmux`/communication fit the regression t_rx ≈ a + k·tick over a sliding window
 (default 60 s, robust to outliers), excluding gaps and LLC resets. k ≈ 1.0 means a correct
 LLC clock; the model predicts k ≈ 1/0.655 ≈ 1.53 for firmware v2.20. The value is logged
-every second. Parameter `dt_source = LLC_TICK | LLC_TICK_SCALED | HLC_RX` selects which
-Δt the estimator uses (default `LLC_TICK`, as decided in thesis §3.2.4), which lets the
-clock hypothesis be tested on recorded data without changing the firmware.
+every second. Parameter `est.dt_source` selects which Δt the estimator uses: `0` = LLC
+tick (default, as decided in thesis §3.2.4), `1` = HLC arrival time `t_rx` from `llcmux`.
+The raw tick is always kept (`llc_tick`) for the fit and the logs, so the clock hypothesis
+can be tested on recorded data without changing the firmware. (A `LLC_TICK_SCALED` option
+was dropped: with the measured k it gives nothing that `1` does not.)
+
+**Measurement (firmware v3.0, 2026-10-06).** Two 58 s captures: 1559 and 1542 frames,
+tick +20 per frame, host period ≈ 37 ms (26.7 Hz) → **k = 1.86–1.90**, worse than the
+predicted 1.53 (the v3.0 loop does more I²C and TX work). An emulated UMBmark with that
+clock (`llc_emulator.py --rate 26.7 --tick-ms 20`) replayed through the model ends with
+θ = −168° and a 4.9 m closure error with `dt_source = 0`, and closes to 4 cm / 0.1° with
+`dt_source = 1`: the encoder rate ω_enc = Δθ/Δt is overestimated by k while the gyro is
+not, so the EKF fuses inconsistent rates. **Until the firmware loop is timer-driven,
+live tests must use `est.dt_source = 1`.**
 
 ---
 
@@ -787,7 +812,7 @@ are the model field names.
 | | `dt_min`, `dt_max` | 1 ms, 500 ms | — |
 | Fusion `fprm.*` | `gyro_scale` (sign included), `yaw_axis`, `acc_scale` | (π/180)/131, z, 9.80665/16384 | DER (firmware ±250 °/s, ±2 g); axis/sign TBD by hand rotation |
 | | `dt_reject` (`dtick_max`), `dcount_reject` (`rate_max_counts_s`), `reset_window_counts`, `K_rereference`, `N_still`, `tilt_rollover` | 2000 ms, *TBD*, 1000, 3, 1, 30° | PROV |
-| Estimation `eprm.*` | `T_init`, `t_gap_max`, `dt_source` | 3 s, 10 s, `LLC_TICK` | PROV |
+| Estimation `eprm.*` | `T_init`, `t_gap_max`, `dt_source` | 3 s, 10 s, `0` (LLC tick; use `1` with firmware ≤ v3.0, §10.4) | PROV |
 | I/O | `raw_input`, `gps_port`, `gps_baud`, `udp_pose_dest`, `udp_ctrl_port`, `pose_decimation`, `log_dir` | `/run/olympus/llc_raw`, `/dev/ttyAMA0`, 9600, `127.0.0.1:47001`, 47002, 1, `/var/log/olympus-pose` | — |
 | RT | `prio_*`, `cpu_pipeline`, `cpu_gps` | §10.1 | — |
 
@@ -805,7 +830,7 @@ Unknown keys or missing required keys are a start-up error. The parsed set is wr
 | Message dropped at a mailbox | Producer send fails / sequence gap | Next message carries the totals | `producer_drops`, `lost` |
 | LLC reset (power, DTR, watchdog reboot) | Tick backwards + counts near 0 | Re-reference, no jump in the pose | `LLC_RESET` |
 | IMU failure (fw v2.20) | No `RAW:` frames at all | Pose held, `STALE` after 100 ms; resumes on data | `STALE` |
-| IMU failure (future frame with `imu_ok`) | `IMU_VALID` = 0 | Odometry only, P grows | `IMU_INVALID` |
+| IMU failure (fw v3.0, `imu_ok = 0`) | `IMU_VALID` = 0 | Odometry only, P grows; `imu_bad_frames` counted | `IMU_INVALID` |
 | Long link interruption | Δt > `dt_max` (500 ms) | Integrate the exact Δs, Δθ in sub-steps of ≤ `dt_max`; only re-reference beyond `t_gap_max` | `GAP` |
 | Wheel slip on one side | δ > δ_th | Q inflated by γ (thesis §3.2.9) | `SLIP` |
 | Equal slip on all six wheels | Not detectable (thesis §3.2.9) | Documented limitation | — |
@@ -1278,9 +1303,10 @@ alternatives raised during the design, including the adviser's, are on record:
 |---|---|---|---|
 | Fusion / estimation core | Simulation repo, branch `step3-model`: `sep_fusion_step`, `sep_estimation_step` (+ init, message); generated into `agents/src/core/gen` by `codegen_hlc_core.m` | 13/13 model tests; full UMBmark results identical to the previous model; Simulink = MATLAB; generated C = MATLAB on 2591 frames (zero difference); strict C99 for aarch64 | — |
 | Parameters | `export_pose_conf.m` → section 1 of `agents/config/pose.conf` | Parser tests; equivalence test runs from the shipped file | — |
-| Agents + supervisor | `agents/src` | Cross-compiled for aarch64 with `-std=c99 -Wall -Wextra -Werror`; core unit tests (68 checks incl. parser fuzz) | Replay, 15 min live delivery test (V-OE4-1/2), latency (V-OE5-1) |
+| Agents + supervisor | `agents/src` | Cross-compiled for aarch64 with `-std=c99 -Wall -Wextra -Werror`; core unit tests (92 checks incl. v2.20 and v3.0 parser fuzz and 300 real v3.0 frames) | Replay, 15 min live delivery test (V-OE4-1/2), latency (V-OE5-1) |
+| LLC firmware v3.0 support | Acquisition (9 or 11 fields), `imu_bad_frames`, `imu_temp_c`, `frame_version` in `pose.csv`; `est.dt_source` | Both 2026-10-06 captures parse completely; replayed in the model: 0 rejects; emulated IMU loss (10 s) handled as `IMU_INVALID` without gaps | Live run with the rover and `dt_source = 1` |
 | `llcmux` | `agents/tools/llcmux` | Cross-compiled | RAW filtering with `olympus_hlc`, DTR reset on open, reconnect (V-OE5-4/5) |
-| Emulator and tools | `agents/tools` | Emulated UMBmark replayed in MATLAB: distance exact (8.000 m), square closes to 1.65 % | Live pty mode on the RPi |
+| Emulator and tools | `agents/tools`: `llc_emulator.py` (v3.0/v2.20 frames, `--imu-off`, `--tick-ms`), `capture_to_replay.py` | Emulated UMBmark replayed in MATLAB: distance exact (8.000 m), square closes to 1.65 %; slow-clock run reproduces the k ≈ 1.87 error and its `dt_source = 1` fix (§10.4) | Live pty mode on the RPi |
 | Yocto | `meta-olympus-pose/recipes-pose/olympus-pose`, udev bbappend, image bbappend | — | `bitbake olympus-pose`, boot with `llcmux` |
 
 Implementation choices not in the earlier sections:

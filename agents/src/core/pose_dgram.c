@@ -51,7 +51,7 @@ void pe_pose_dgram_encode(const pe_pose_msg_t* m, uint32_t seq, uint64_t t_pub_n
 	put_u32(out + 4, seq);
 	put_u64(out + 8, t_pub_ns);
 	put_u64(out + 16, m->hdr.t_rx_ns);
-	put_u32(out + 24, m->t_llc_ms);
+	put_u32(out + 24, m->llc_tick);   /* LLC tick as sent, whatever est.dt_source is */
 	put_u16(out + 28, m->mode);
 	put_u16(out + 30, m->status);
 	put_f64(out + 32, m->x[0]);

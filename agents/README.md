@@ -21,7 +21,8 @@ olympus-pose:  acquisition → fusion → estimation → communication ← GPS (
 | `src/core/gen/` | **Generated** by MATLAB Coder (`codegen_hlc_core.m` in the simulation repo). Never edit by hand |
 | `src/port/` | The only Linux-specific code: serial/pty, UDP, async log writer, memory locking |
 | `tools/llcmux/` | LLC link multiplexer (DESIGN.md §6) |
-| `tools/llc_emulator.py` | 50 Hz RAW: generator (pty or file) for tests without the rover |
+| `tools/llc_emulator.py` | RAW: generator (pty or file) for tests without the rover: firmware v3.0 or v2.20 frames, IMU loss, slow LLC clock |
+| `tools/capture_to_replay.py` | Turns a `raw_*.csv` of the LLC repo's `capture_rover_data.py` into a replay file |
 | `tools/pose_listen.py`, `tools/pose_ctl.py` | UDP pose viewer and control-port client |
 | `config/pose.conf` | Configuration: model parameters (from `export_pose_conf.m`) + application settings |
 | `tests/` | Host unit tests and the MATLAB↔C equivalence vectors |
@@ -47,8 +48,9 @@ cmake --build build-core
 ./build-core/pe_tests
 ```
 
-Expected: `OK: 68 checks passed`, including the RAW parser fuzz (10⁶ mutations) and the
-generated C reproducing MATLAB on 2591 frames with zero difference.
+Expected: `OK: 92 checks passed`, including the RAW parser fuzz (10⁶ mutations each for
+the v2.20 and v3.0 frames), 300 real v3.0 frames (LLC clock scale ≈ 1.86) and the generated
+C reproducing MATLAB on 2591 frames with zero difference.
 
 **After changing the model or its parameters** (in MATLAB, simulation repo,
 `Simulation Model v2.0`):
@@ -93,6 +95,30 @@ time). Replay it through the app, without drops and reproducibly:
 olympus-pose -c /etc/olympus-pose/pose.conf -r DIR/<run>/llc_record.txt
 ```
 
+## LLC firmware versions
+
+Both `RAW:` frames are accepted; the version of each frame is logged (`frame_version` in
+`pose.csv`):
+
+| Firmware | Frame | IMU failure |
+|---|---|---|
+| v2.20 | `RAW:tick:ax:ay:az:gx:gy:gz:encL:encR` | no frames at all → `STALE` |
+| v3.0 (MPU-9250) | `…:encR:temp:imu_ok` | frames keep coming with `imu_ok = 0` → odometry only, `IMU_INVALID`, `imu_bad_frames` counts them |
+
+**Time base.** Both firmwares advance `tick` by 20 per loop, but the v3.0 loop really takes
+≈ 37 ms (LLC clock scale ≈ 1.87, column `llc_clock_scale` of `stats.csv`). With the default
+`est.dt_source = 0` (LLC tick) the encoder turn rate is then overestimated and the heading
+is wrong (DESIGN.md §10.4). **Set `est.dt_source = 1` (HLC arrival time from `llcmux`)
+until the firmware loop is timer-driven.** Replays of `llcmux` recordings and of converted
+captures carry the arrival times, so both settings can be compared on the same file.
+
+Bench captures from `capture_rover_data.py` can be replayed directly:
+
+```bash
+capture_to_replay.py raw_20261006_183344.csv -o /tmp/cap.txt
+olympus-pose -c /etc/olympus-pose/pose.conf -r /tmp/cap.txt
+```
+
 ## Testing on a spare Raspberry Pi (no rover)
 
 Run as root (real-time priorities). Each step only needs the previous ones.
@@ -106,6 +132,14 @@ Run as root (real-time priorities). Each step only needs the previous ones.
    `pose.csv`: the 2 m square should close to roughly 1–3 % of 8 m, `s_m` = 8.000.
    In replay the `latency_ms` column is not meaningful (it compares recorded arrival times
    with the current clock); latency is measured live (step 2).
+   **Firmware v3.0 conditions** — slow LLC clock and a 10 s IMU loss:
+   ```bash
+   llc_emulator.py --out /tmp/slow.txt --prefix --rate 26.7 --tick-ms 20 --imu-off 60:70
+   ```
+   Replay it once with `est.dt_source = 0` and once with `1`: with `0` the square does not
+   close (heading off by ~170°), with `1` it closes to a few cm. Between 60 and 70 s
+   `pose.csv` must show `IMU_INVALID` (status bit) and `imu_bad_frames` rising by ≈ 267,
+   with no `GAP`.
 2. **Live, OE4 delivery test** (V-OE4-2, 15 min at 50 Hz). In `pose.conf` set
    `io.raw_input = /tmp/llc_emu`, then:
    ```bash

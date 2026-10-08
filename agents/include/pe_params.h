@@ -45,6 +45,9 @@ typedef struct {
 	double t_init_s;                 /* rest time before the pose is declared valid */
 	double stale_ms;                 /* no input for this long -> STALE */
 	int    gyro_yaw_axis;            /* 0 = x, 1 = y, 2 = z */
+	int    dt_source;                /* 0 = LLC tick (thesis §3.2.4), 1 = HLC arrival time
+	                                    (llcmux @t_rx_ns), for firmware whose tick does not
+	                                    count real time (DESIGN.md §10.4) */
 
 	/* real-time scheduling (SCHED_FIFO priorities, CPUs; -1 = do not pin) */
 	int    prio_ams, prio_acq, prio_fus, prio_est, prio_com, prio_gps;

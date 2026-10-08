@@ -128,7 +128,7 @@ int main(int argc, char** argv)
 		"P_xx,P_yy,P_xy,P_thth,P_ww,P_bb,"
 		"s_m,delta,gamma,nis,latency_ms,"
 		"acq_delivered,acq_lost,acq_max_gap,acq_drops,fus_delivered,fus_lost,fus_max_gap,fus_drops,"
-		"frames_ok,frames_bad,rejects,substeps,gaps\n");
+		"frames_ok,frames_bad,rejects,substeps,gaps,imu_bad_frames,imu_temp_c,frame_version\n");
 	pe_log_printf(g_log_gps, "t_rx_ns,utc_ms,lat_deg,lon_deg,alt_m,quality,sats,hdop,speed_mps,course_deg,valid\n");
 	pe_log_printf(g_log_stats,
 		"t_ns,t_run_s,rss_kb,cpu_s,poses,lat_p50_ms,lat_p95_ms,lat_max_ms,interval_p95_ms,interval_max_ms,"

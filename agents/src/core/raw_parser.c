@@ -61,13 +61,14 @@ static int parse_u64(const char* s, size_t n, uint64_t* out)
 
 pe_line_kind_t pe_raw_parse(const char* line, size_t len, pe_raw_frame_t* out)
 {
-	static const long long lo[9] = { 0, -32768, -32768, -32768, -32768, -32768, -32768,
-		-2147483648LL, -2147483648LL };
-	static const long long hi[9] = { 4294967295LL, 32767, 32767, 32767, 32767, 32767, 32767,
-		2147483647LL, 2147483647LL };
-	long long v[9];
+	/* tick, ax, ay, az, gx, gy, gz, encL, encR, [temp, imu_ok] */
+	static const long long lo[11] = { 0, -32768, -32768, -32768, -32768, -32768, -32768,
+		-2147483648LL, -2147483648LL, -32768, 0 };
+	static const long long hi[11] = { 4294967295LL, 32767, 32767, 32767, 32767, 32767, 32767,
+		2147483647LL, 2147483647LL, 32767, 1 };
+	long long v[11];
 	size_t pos, start;
-	int field;
+	int field, nfields;
 
 	memset(out, 0, sizeof(*out));
 	if (len > 0 && line[len - 1] == '\r') {
@@ -96,7 +97,18 @@ pe_line_kind_t pe_raw_parse(const char* line, size_t len, pe_raw_frame_t* out)
 	}
 	pos += 4;
 
-	for (field = 0; field < 9; field++) {
+	/* the field count decides the version: 9 (v2.20) or 11 (v3.0) */
+	nfields = 1;
+	for (start = pos; start < len; start++) {
+		if (line[start] == ':') {
+			nfields++;
+		}
+	}
+	if (nfields != 9 && nfields != 11) {
+		return PE_LINE_BAD;
+	}
+
+	for (field = 0; field < nfields; field++) {
 		start = pos;
 		while (pos < len && line[pos] != ':') {
 			pos++;
@@ -104,17 +116,15 @@ pe_line_kind_t pe_raw_parse(const char* line, size_t len, pe_raw_frame_t* out)
 		if (parse_int(line + start, pos - start, lo[field], hi[field], &v[field]) != 0) {
 			return PE_LINE_BAD;
 		}
-		if (field < 8) {
-			if (pos >= len) {
-				return PE_LINE_BAD;          /* too few fields */
-			}
-			pos++;                           /* skip ':' */
+		if (field < nfields - 1) {
+			pos++;                           /* skip ':' (count already checked) */
 		}
 	}
 	if (pos != len) {
-		return PE_LINE_BAD;                  /* trailing characters / extra fields */
+		return PE_LINE_BAD;
 	}
 
+	out->version = nfields == 11 ? 3 : 2;
 	out->tick = (uint32_t)v[0];
 	out->acc[0] = (int16_t)v[1];
 	out->acc[1] = (int16_t)v[2];
@@ -124,5 +134,13 @@ pe_line_kind_t pe_raw_parse(const char* line, size_t len, pe_raw_frame_t* out)
 	out->gyr[2] = (int16_t)v[6];
 	out->enc_l = (int32_t)v[7];
 	out->enc_r = (int32_t)v[8];
+	if (nfields == 11) {
+		out->temp_raw = (int16_t)v[9];
+		out->imu_ok = (int)v[10];
+	}
+	else {
+		out->temp_raw = 0;
+		out->imu_ok = 1;     /* v2.20 only sends RAW: when the IMU read succeeded */
+	}
 	return PE_LINE_RAW;
 }
