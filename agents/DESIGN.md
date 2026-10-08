@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document | ARQ-PE-003 — Agent architecture and LLC→HLC data path (draft) |
-| Version | v0.6 — 2026-10-06 (week 10). v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
+| Version | v0.7 — 2026-10-07 (week 10). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
 | Covers | Deliverable "Documento de arquitectura multiagente y protocolo serial LLC-HLC" (OE2, OE4; milestone H2) and the design basis for the OE4/OE5/OE6 validation |
 | Sources | Thesis report *Olympus_pose_TFG.pdf* (ch. 1, 2.1.4–2.1.8, 3.1–3.4, 4); `requirements/DRT-SEP-001.md` v0.2; `requirements/ICD-PE-002.md` v1.0; LLC firmware v2.20 (`Alonso11/rover-low-level-controller`, `src/main.rs`); HLC image (`Alonso11/olympus-hlc-rpi5`, `olympus_hlc` v3.x, `rover_bridge`); CMAES pthreads port (`CMAES/libCMAES_pthreads`); simulation model v2.0 (`JorgeSchofield/olympus-pose-estimation-simulation`, folder `Simulation Model v2.0`) |
 | Status | Design only — no code yet. Section 17 lists the changes this design implies for the thesis report |
@@ -834,6 +834,11 @@ After L1–L6, re-run the OE3 indicator with `cmaes_rps_stress_demo 45000 20 3` 
 RPi 5): players at 50 Hz, AMS suspend/resume every round, checksummed payloads, RSS sampled
 after warm-up. Pass = exit code 0 and `RESULT : PASS`.
 
+**Result (2026-10-07, RPi 5 with the Olympus image, CPU 3):** PASS. 45 000 messages in 450.0 s
+(100 msg/s), 22 499 rounds with 44 998 suspends and resumes each; 0 sequence gaps, 0 duplicates,
+0 bad checksums, 0 send failures, 0 AMS errors, 0 suspend or receive timeouts; RSS 1712 kB at
+baseline and at the end (growth 0 kB). **OE3 indicator met; milestone H3 closed.**
+
 ---
 
 ## 15. Code organisation, build and deployment
@@ -1255,7 +1260,7 @@ alternatives raised during the design, including the adviser's, are on record:
 
 | ID | Item | Needed for | Proposed action |
 |---|---|---|---|
-| S-1 | **Spike:** confirm `rover_bridge` works through a pty. Run `tools/spike_pty_check.py` on the rover as root; it uses a fake LLC and never touches the real port | D1 | First task; if it fails, fall back to a tee hook in `rover_bridge` (needs owner approval) |
+| S-1 | **Spike:** `rover_bridge` through a pty, `tools/spike_pty_check.py` on an RPi 5 with the image (no Arduino needed) | D1 | First run (2026-10-07): open, write, read and exclusive lock all verified; the `command` check failed only because the fake LLC was a thread and `rover_bridge` holds the Python GIL while waiting for the reply. v2 runs the fake LLC in a separate process, like `llcmux`; rerun to close |
 | Q-1 | ~~pty naming~~ — **closed:** udev rename (from the pose layer, via `.bbappend`) + `llcmux` publishes `/dev/arduino_mega` (§3.2, §15.3, D13) | — | Inform the owner of `olympus-hlc-rpi5`; that repository is not edited |
 | Q-2 | ~~Model files missing~~ — **closed:** `Simulation Model v2.0` reviewed; changes listed in §9.4 and §17.14 | — | — |
 | Q-3 | ~~Hand-written vs generated~~ — **closed:** MATLAB Coder from the unchanged core files + two wrappers (D14); MATLAB and MATLAB Coder licenses confirmed (2026-10-05) | — | — |
