@@ -1,0 +1,5 @@
+# /etc/default/llcmux - options for /etc/init.d/llcmux (see llcmux --help).
+#
+# Add  --record-dir /var/lib/olympus-pose/llc  to record every LLC line with its HLC
+# arrival time (replay with: olympus-pose -r <dir>/<run>/llc_record.txt).
+LLCMUX_ARGS="--hw /dev/arduino_mega_hw --pty-link /dev/arduino_mega --raw-link /run/olympus/llc_raw --prio 45 --cpu 3 --stats-every 10"

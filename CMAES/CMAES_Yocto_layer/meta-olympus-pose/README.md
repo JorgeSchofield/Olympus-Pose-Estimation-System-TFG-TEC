@@ -19,8 +19,15 @@ directory named `meta-olympus-pose`; the collection is `olympus-pose`.
 conf/layer.conf                                  layer metadata
 recipes-cmaes/cmaes/cmaes_0.1.0.bb               library + demos
 recipes-cmaes/cmaes/files/*.service              systemd units (inert on sysvinit)
-recipes-core/images/olympus-image.bbappend       adds cmaes-demos to the rover image
+recipes-pose/olympus-pose/olympus-pose_0.1.0.bb  the pose app (agents/) and llcmux
+recipes-pose/olympus-pose/files/                 sysvinit scripts, /etc/default/llcmux
+recipes-core/custom-udev-rules/                  bbappend: real Arduino port -> /dev/arduino_mega_hw
+recipes-core/images/olympus-image.bbappend       adds olympus-pose and olympus-pose-llcmux
 ```
+
+With this layer the Arduino Mega appears as `/dev/arduino_mega_hw`, and `llcmux` (started at
+boot) publishes `/dev/arduino_mega` for `olympus_hlc`. Removing the layer restores the
+original rover image; no file of `olympus-hlc-rpi5` is edited.
 
 ## Install
 
@@ -55,6 +62,8 @@ Nothing in `local.conf` needs to change. `enable_uart=1` and
 | `cmaes-staticdev` | `libcmaes_pthreads.a` |
 | `cmaes-dev` | `${includedir}/cmaes/CMAES.h` |
 | `cmaes-demos` | the three demo binaries (`sender_receiver`, `rock_paper_scissors`, `rps_stress`), plus units if the image uses systemd |
+| `olympus-pose` | `/usr/bin/olympus-pose`, `/etc/olympus-pose/pose.conf`, the Python tools, `/etc/init.d/olympus-pose` (S91) |
+| `olympus-pose-llcmux` | `/usr/bin/llcmux`, `/etc/default/llcmux`, `/etc/init.d/llcmux` (S90) |
 
 ## Caveats
 
@@ -62,13 +71,13 @@ Nothing in `local.conf` needs to change. `enable_uart=1` and
    no `sed`, no hand-written `do_install` and no `-Wno-error` flags. Since
    `671bf4a` the library builds as strict C99 without warnings, so it is
    ready for GCC 14 as well as scarthgap's GCC 13.
-2. **Init system: probably sysvinit, to be confirmed on the board.**
+2. **Init system: sysvinit (confirmed on the board, 2026-10-07).**
    `build/conf/local.conf` sets no `INIT_MANAGER` and `DISTRO = "poky"`
-   defaults to sysvinit in scarthgap, so the `.service` files would be
-   installed but never run. The rover's own decision log says the image
-   uses systemd, so check with `ps -p 1 -o comm=`. On sysvinit, run the demos
-   from the shell. Do not change `INIT_MANAGER` for this: it rebuilds the
-   whole image and changes the rover's baseline.
+   defaults to sysvinit in scarthgap (the rover's decision log saying
+   systemd is outdated). The demos' `.service` files are therefore inert:
+   run the demos from the shell. `olympus-pose` and `llcmux` ship sysvinit
+   scripts. Do not change `INIT_MANAGER`: it rebuilds the whole image and
+   changes the rover's baseline.
 3. **`SCHED_FIFO` needs privilege.** Without `CAP_SYS_NICE` the port prints
    one warning and falls back to `SCHED_OTHER` with advisory priorities.
    Root has it.
