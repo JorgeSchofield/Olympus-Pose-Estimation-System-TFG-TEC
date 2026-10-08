@@ -115,7 +115,7 @@ void pe_params_defaults(pe_params_t* p)
 	p->udp_pose_port2 = 0;
 	p->udp_ctrl_port = 47002;
 	p->pose_decimation = 1;
-	strcpy(p->log_dir, "/var/log/olympus-pose");
+	strcpy(p->log_dir, "/var/lib/olympus-pose/runs");   /* /var/log is tmpfs in poky */
 	p->t_init_s = 3.0;
 	p->stale_ms = 100.0;
 	p->gyro_yaw_axis = 2;

@@ -105,7 +105,19 @@ int pe_log_start(const char* base, char* run_dir, size_t run_dir_len)
 	char stamp[32];
 	localtime_r(&now, &tmv);
 	strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &tmv);
-	mkdir(base, 0755);
+	{   /* mkdir -p base */
+		char p[512];
+		size_t k;
+		snprintf(p, sizeof(p), "%s", base);
+		for (k = 1; p[k] != '\0'; k++) {
+			if (p[k] == '/') {
+				p[k] = '\0';
+				mkdir(p, 0755);
+				p[k] = '/';
+			}
+		}
+		mkdir(p, 0755);
+	}
 	snprintf(run_dir_path, sizeof(run_dir_path), "%s/%s", base, stamp);
 	if (mkdir(run_dir_path, 0755) != 0 && errno != EEXIST) {
 		return -1;

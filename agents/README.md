@@ -75,7 +75,8 @@ pose_ctl.py STATS
 `olympus_hlc` is started by hand as before; it finds `/dev/arduino_mega` (now the
 `llcmux` pty) and needs no change.
 
-Logs: `/var/log/olympus-pose/<YYYYmmdd-HHMMSS>/`
+Logs: `/var/lib/olympus-pose/runs/<YYYYmmdd-HHMMSS>/` (persistent; `/var/log` is in RAM on the
+rover image)
 
 | File | Content |
 |---|---|
