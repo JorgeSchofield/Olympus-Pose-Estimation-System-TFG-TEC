@@ -20,7 +20,8 @@ olympus-pose:  acquisition → fusion → estimation → communication ← GPS (
 | `src/core/` | Portable C99: RAW and NMEA parsers, `pose.conf` parser, statistics, UDP datagram |
 | `src/core/gen/` | **Generated** by MATLAB Coder (`codegen_hlc_core.m` in the simulation repo). Never edit by hand |
 | `src/port/` | The only Linux-specific code: serial/pty, UDP, async log writer, memory locking |
-| `tools/llcmux/` | LLC link multiplexer (DESIGN.md §6) |
+| `tools/llcmux/` | LLC link multiplexer (DESIGN.md §6). Writes each line to `olympus_hlc` whole, with a leading `\n` (§6.1) |
+| `tools/odom_calib.py` | Per-side encoder calibration from recorded straight runs and spins (DESIGN.md §9.5) |
 | `tools/llc_emulator.py` | RAW: generator (pty or file) for tests without the rover: firmware v3.0 or v2.20 frames, IMU loss, slow LLC clock |
 | `tools/capture_to_replay.py` | Turns a `raw_*.csv` of the LLC repo's `capture_rover_data.py` into a replay file |
 | `tools/pose_listen.py`, `tools/pose_ctl.py` | UDP pose viewer and control-port client |
@@ -76,6 +77,14 @@ pose_ctl.py STATS
 
 `olympus_hlc` is started by hand as before; it finds `/dev/arduino_mega` (now the
 `llcmux` pty) and needs no change.
+
+**Pose axes** (thesis §2.1, DESIGN.md §11.0): the origin and axes are the rover's pose when
+the estimator starts. **x = where the front pointed, y = to its left**, θ counter-clockwise.
+Driving straight ahead increases **x**; that is correct, not swapped axes.
+
+**IMU mounting**: only the vertical axis matters. Set `est.gyro_yaw_axis` to the IMU axis
+that points up (0 x, 1 y, 2 z); the same axis is used for the rollover tilt. If it points
+down, flip the sign of `ag.gyro_scale` in the model and re-export.
 
 Logs: `/var/lib/olympus-pose/runs/<YYYYmmdd-HHMMSS>/` (persistent; `/var/log` is in RAM on the
 rover image)
@@ -159,3 +168,20 @@ Run as root (real-time priorities). Each step only needs the previous ones.
 `/etc/init.d/llcmux` and `/etc/init.d/olympus-pose` start at boot. Then follow the OE5 and
 OE6 tests in DESIGN.md §16 (latency over 15 min with vision running, kill/restart checks,
 IMU unplugged, UMBmark and straight-line runs with `pose_ctl.py MARK` at each start/stop).
+
+**Calibrate the encoder scale first** (DESIGN.md §9.5). The model's per-wheel constants
+(including FR = 2.47 × FL) are not trusted for distance until this is done:
+
+1. Add `--record-dir /var/lib/olympus-pose/cal` to `LLCMUX_ARGS` in `/etc/default/llcmux`
+   and reboot (or restart `llcmux`, then `olympus_hlc`).
+2. In one session: three straight runs of 2 m forward and one spin of one turn CCW in
+   place, with ≥ 3 s at rest before each and between them. Measure each straight run
+   with a tape between the same point of the chassis.
+3. ```bash
+   R=/var/lib/olympus-pose/cal/<run>/llc_record.txt
+   odom_calib.py --list $R                  # numbers the motions: #1, #2, ...
+   odom_calib.py --straight $R#1:2.00 --straight $R#2:2.00 --straight $R#3:2.00 --spin $R#4:1
+   ```
+4. Copy the printed `k_cal_R`, `k_cal_L` (and `chi`) into `sep_geo_params.m`, run
+   `export_pose_conf`, paste section 1 into `pose.conf`, restart `olympus-pose`, and
+   repeat one straight run as the check (error ≤ 2 %).

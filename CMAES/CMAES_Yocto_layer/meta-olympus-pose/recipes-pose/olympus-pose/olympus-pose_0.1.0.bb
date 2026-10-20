@@ -52,5 +52,6 @@ INITSCRIPT_PARAMS:${PN}-llcmux = "start 90 2 3 4 5 . stop 10 0 1 6 ."
 INITSCRIPT_NAME:${PN} = "olympus-pose"
 INITSCRIPT_PARAMS:${PN} = "start 91 2 3 4 5 . stop 09 0 1 6 ."
 
-# The Python test tools (pose_listen.py, pose_ctl.py, llc_emulator.py, capture_to_replay.py).
+# The Python test tools (pose_listen.py, pose_ctl.py, llc_emulator.py, capture_to_replay.py,
+# odom_calib.py).
 RDEPENDS:${PN} += "python3-core python3-csv python3-terminal"

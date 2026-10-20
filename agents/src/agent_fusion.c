@@ -48,9 +48,12 @@ static void fus_action(CyclicBehaviour* b, void* arg)
 	pe_link_account(&link_acq, &last_in_seq, in.hdr.seq);
 	link_acq.producer_drops = in.producer_drops;
 
-	acc[0] = in.acc[0];
-	acc[1] = in.acc[1];
-	acc[2] = in.acc[2];
+	/* The core takes acc[2] as the vertical axis (tilt for ROLLOVER only).
+	 * The vertical is the gyro yaw axis, so a rotated IMU mounting is set
+	 * once with est.gyro_yaw_axis; the order of the other two is irrelevant. */
+	acc[0] = in.acc[(g_params.gyro_yaw_axis + 1) % 3];
+	acc[1] = in.acc[(g_params.gyro_yaw_axis + 2) % 3];
+	acc[2] = in.acc[g_params.gyro_yaw_axis];
 	llc_resets_before = fst.n_llc_reset;
 	rerefs_before = fst.n_reref;
 	sep_fusion_step(&fst, (double)in.t_llc_ms, (double)in.enc_l, (double)in.enc_r,
