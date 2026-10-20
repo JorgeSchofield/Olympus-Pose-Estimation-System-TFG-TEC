@@ -16,11 +16,12 @@ SRC_URI = "git://github.com/JorgeSchofield/Olympus-Pose-Estimation-System-TFG-TE
            file://llcmux.default \
 "
 
-# ce190ad: application with LLC firmware v3.0 support (RAW frame with temp and
-# imu_ok, est.dt_source). The CMAES library is built from the SAME commit (agents/CMakeLists.txt adds ../CMAES), so the app
+# f9113c0: firmware v3.0 frame (temp, imu_ok, est.dt_source), llcmux whole-line
+# framing for olympus_hlc, FR = 2.47 x FL, odom_calib.py.
+# The CMAES library is built from the SAME commit (agents/CMakeLists.txt adds ../CMAES), so the app
 # and the library can never drift apart. The fetcher requires SRCREV to be on
 # branch=main: merge the master->main pull request before running bitbake.
-SRCREV = "ce190adb6a24859eba06ff7ae19852cd4332007f"
+SRCREV = "f9113c008ab6658d1b6a3694d44b65d29520bfaa"
 PV = "0.1.0+git"
 
 S = "${WORKDIR}/git"
