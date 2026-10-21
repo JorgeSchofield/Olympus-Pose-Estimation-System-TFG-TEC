@@ -17,6 +17,7 @@
 #include "nmea_parser.h"
 #include "pe_msgs.h"
 #include "pe_params.h"
+#include "pipeline.h"
 #include "pose_dgram.h"
 #include "raw_parser.h"
 #include "sep_estimation_init.h"
@@ -420,6 +421,158 @@ static void test_equivalence(void)
 		rows, est_steps, worst_fus, worst_est);
 }
 
+/* ------------------------ V-U-10: model and app run the same estimation chain
+ * tests/data/replay_input.txt goes through what the agents do in replay mode
+ * (pe_raw_parse -> pipeline.c -> generated fusion -> generated estimation, no
+ * message dropped, estimation once per fusion message) and must publish the
+ * same poses, at the same input lines, as the model's hlc_replay.m
+ * (replay_vectors_dt<k>.csv, from tests/matlab/export_replay_vectors.m). */
+static void replay_parity(int dt_source)
+{
+	char path[512], line[512], row[1024];
+	FILE *fin, *fv;
+	pe_params_t p;
+	char err[256];
+	sep_fusion_state_t fs;
+	sep_estimation_state_t es;
+	long lineno = 0, poses = 0, bad_rows = 0;
+	double worst = 0;
+
+	pe_params_defaults(&p);
+	if (pe_params_load(&p, PE_TEST_CONF, err, sizeof(err)) != 0) {
+		CHECK(0, "config: %s", err);
+		return;
+	}
+	p.dt_source = dt_source;
+	snprintf(path, sizeof(path), "%s/replay_input.txt", PE_TEST_DATA);
+	fin = fopen(path, "r");
+	snprintf(path, sizeof(path), "%s/replay_vectors_dt%d.csv", PE_TEST_DATA, dt_source);
+	fv = fopen(path, "r");
+	CHECK(fin != NULL && fv != NULL, "cannot open the replay files (%s)", path);
+	if (fin == NULL || fv == NULL) {
+		if (fin) fclose(fin);
+		if (fv) fclose(fv);
+		return;
+	}
+	if (fgets(row, sizeof(row), fv) == NULL) {   /* header */
+		row[0] = '\0';
+	}
+	sep_fusion_init_initialize();
+	sep_fusion_init(&fs);
+	sep_estimation_init(&p.prm, &es);
+
+	while (fgets(line, sizeof(line), fin) != NULL) {
+		pe_raw_frame_t f;
+		sep_odom_t od;
+		boolean_T emit = 0, did = 0;
+		double acc[3], gz, xe[5], dg[3], v[15];
+		uint32_t t_in;
+		size_t len = strcspn(line, "\r\n");
+		int k = 0, i;
+		char* s = row;
+
+		lineno++;
+		if (pe_raw_parse(line, len, &f) != PE_LINE_RAW) {
+			continue;
+		}
+		t_in = pe_time_base_ms(f.tick, f.t_rx_ns, p.dt_source);
+		pe_fusion_axes(f.acc, f.gyr, p.gyro_yaw_axis, &gz, acc);
+		sep_fusion_step(&fs, (double)t_in, (double)f.enc_l, (double)f.enc_r, gz, acc,
+			(boolean_T)f.imu_ok, &p.geo, &p.ag, &od, &emit);
+		if (!emit) {
+			continue;
+		}
+		sep_estimation_step(&es, &od, &p.prm, &p.ag, xe, dg, &did);
+		if (!did) {
+			continue;
+		}
+		poses++;
+		if (fgets(row, sizeof(row), fv) == NULL) {
+			bad_rows++;
+			continue;
+		}
+		while (k < 15) {
+			char* end;
+			v[k++] = strtod(s, &end);
+			if (*end != ',') break;
+			s = end + 1;
+		}
+		/* same input line, same time value, then S, x[5], diag[3], still, imu_ok */
+		if (k != 15 || v[0] != (double)lineno || v[3] != (double)t_in
+			|| v[13] != (double)od.still || v[14] != (double)f.imu_ok) {
+			bad_rows++;
+			continue;
+		}
+		{
+			double e = rel(od.S, v[4]);
+			for (i = 0; i < 5; i++) if (rel(xe[i], v[5 + i]) > e) e = rel(xe[i], v[5 + i]);
+			for (i = 0; i < 3; i++) if (rel(dg[i], v[10 + i]) > e) e = rel(dg[i], v[10 + i]);
+			if (e > worst) worst = e;
+		}
+	}
+	if (fgets(row, sizeof(row), fv) != NULL) {
+		bad_rows++;                              /* the model published more poses */
+	}
+	fclose(fin);
+	fclose(fv);
+	CHECK(poses > 2000, "replay dt_source=%d: only %ld poses", dt_source, poses);
+	CHECK(bad_rows == 0, "replay dt_source=%d: %ld poses at a different line/time/flag than the model",
+		dt_source, bad_rows);
+	CHECK(worst < 1e-9, "replay dt_source=%d: pose differs from the model: %.3g", dt_source, worst);
+	printf("  replay parity (dt_source=%d): %ld lines, %ld poses, worst rel. diff vs model %.2e\n",
+		dt_source, lineno, poses, worst);
+}
+
+/* V-U-9, parser parity: pe_raw_parse and the model's raw_frame_from_bytes give the
+ * same verdict and values on 5000 mutated lines (parser_vectors.csv from
+ * tests/matlab/export_parser_vectors.m). */
+static void parser_parity(void)
+{
+	char path[512], line[256], row[256];
+	FILE *fin, *fv;
+	long n = 0, accepted = 0, differ = 0;
+
+	snprintf(path, sizeof(path), "%s/parser_cases.txt", PE_TEST_DATA);
+	fin = fopen(path, "r");
+	snprintf(path, sizeof(path), "%s/parser_vectors.csv", PE_TEST_DATA);
+	fv = fopen(path, "r");
+	CHECK(fin != NULL && fv != NULL, "cannot open the parser parity files");
+	if (fin == NULL || fv == NULL) {
+		if (fin) fclose(fin);
+		if (fv) fclose(fv);
+		return;
+	}
+	while (fgets(line, sizeof(line), fin) != NULL) {
+		pe_raw_frame_t f;
+		long long m[9];
+		int ok = pe_raw_parse(line, strcspn(line, "\r\n"), &f) == PE_LINE_RAW;
+		n++;
+		if (fgets(row, sizeof(row), fv) == NULL
+			|| sscanf(row, "%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld",
+				&m[0], &m[1], &m[2], &m[3], &m[4], &m[5], &m[6], &m[7], &m[8]) != 9) {
+			differ++;
+			continue;
+		}
+		accepted += ok;
+		if (ok != (int)m[0] || (ok && (m[1] != f.version || m[2] != (long long)f.tick
+			|| m[3] != f.acc[0] || m[4] != f.gyr[2] || m[5] != f.enc_l || m[6] != f.enc_r
+			|| m[7] != f.temp_raw || m[8] != f.imu_ok))) {
+			differ++;
+		}
+	}
+	fclose(fin);
+	fclose(fv);
+	CHECK(n == 5000 && differ == 0, "parser parity: %ld of %ld lines differ from the model", differ, n);
+	printf("  parser parity: %ld lines, %ld accepted, %ld differ from the model\n", n, accepted, differ);
+}
+
+static void test_replay_parity(void)
+{
+	parser_parity();
+	replay_parity(0);
+	replay_parity(1);
+}
+
 int main(void)
 {
 	test_raw();
@@ -428,6 +581,7 @@ int main(void)
 	test_fw_capture();
 	test_misc();
 	test_equivalence();
+	test_replay_parity();
 	printf("%s: %d checks passed, %d failed\n", n_fail ? "FAIL" : "OK", n_pass, n_fail);
 	return n_fail ? 1 : 0;
 }

@@ -31,6 +31,7 @@ add_library(pe_core STATIC
     src/core/stats.c
     src/core/pose_dgram.c
     src/core/line_buf.c
+    src/core/pipeline.c
     ${PE_GEN_SOURCES}
 )
 target_include_directories(pe_core PUBLIC include src/core src/core/gen)

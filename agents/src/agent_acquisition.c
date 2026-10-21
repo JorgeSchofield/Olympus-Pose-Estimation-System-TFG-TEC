@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "line_buf.h"
+#include "pipeline.h"
 #include "port.h"
 #include "raw_parser.h"
 
@@ -59,7 +60,7 @@ static void on_line(void* ctx, const char* line, size_t len)
 	 * firmware whose tick does not count real time (measured 2026-10-06: the
 	 * v3.0 tick runs at ~53 % of real time). Plausibility and the reset check
 	 * then work on this clock; the raw tick still reaches the clock-scale fit. */
-	m->t_llc_ms = g_params.dt_source == 1 ? (uint32_t)(m->hdr.t_rx_ns / 1000000ull) : f.tick;
+	m->t_llc_ms = pe_time_base_ms(f.tick, m->hdr.t_rx_ns, g_params.dt_source);
 	m->enc_l = f.enc_l;
 	m->enc_r = f.enc_r;
 	memcpy(m->acc, f.acc, sizeof(m->acc));

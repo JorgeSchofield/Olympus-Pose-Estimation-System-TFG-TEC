@@ -50,9 +50,23 @@ cmake --build build-core
 ./build-core/pe_tests
 ```
 
-Expected: `OK: 92 checks passed`, including the RAW parser fuzz (10⁶ mutations each for
-the v2.20 and v3.0 frames), 300 real v3.0 frames (LLC clock scale ≈ 1.86) and the generated
-C reproducing MATLAB on 2591 frames with zero difference.
+Expected: `OK: … checks passed, 0 failed`, including the RAW parser fuzz (10⁶ mutations
+each for the v2.20 and v3.0 frames), 300 real v3.0 frames (LLC clock scale ≈ 1.86), the
+generated C reproducing MATLAB on 2591 frames with zero difference, and the two
+**model/app parity** tests (DESIGN.md §9.6): the C parser and the model's parser agree on
+5000 mutated lines, and a recording run through the app's chain gives the same poses as
+the model's `hlc_replay.m`, with both time bases.
+
+**The model and the app estimate the same way.** The model's HLC (`hlc_step.m`) uses the
+same parser rules, the same fusion inputs (`hlc_fusion_inputs.m` = `src/core/pipeline.c`),
+event-driven estimation and the same parameters, including `est.dt_source` and
+`est.gyro_yaw_axis`, which are now exported by the model. To reproduce a rover run in
+MATLAB, replay its `llcmux` recording:
+
+```matlab
+R = hlc_replay('llc_record.txt');        % one row per pose, as pose.csv
+% columns: line t_rx_ns tick t_in S x y theta omega bias d1 d2 d3 still imu_ok
+```
 
 **After changing the model or its parameters** (in MATLAB, simulation repo,
 `Simulation Model v2.0`):
@@ -63,7 +77,11 @@ export_pose_conf                                    % then paste codegen/pose_mo
                                                     % into section 1 of config/pose.conf
 ```
 
-and regenerate the test vectors with `tests/matlab/export_core_vectors.m`.
+and regenerate the test vectors with `tests/matlab/export_core_vectors.m`,
+`export_replay_vectors.m` and (if the parser changed) `export_parser_vectors.m`. A
+change to the parser or to the fusion inputs must be made on both sides
+(`raw_frame_from_bytes.m` / `raw_parser.c`, `hlc_fusion_inputs.m` / `pipeline.c`); the
+parity tests fail otherwise.
 
 ## Running
 
@@ -83,9 +101,10 @@ pose_ctl.py STATS
 the estimator starts. **x = where the front pointed, y = to its left**, θ counter-clockwise.
 Driving straight ahead increases **x**; that is correct, not swapped axes.
 
-**IMU mounting**: only the vertical axis matters. Set `est.gyro_yaw_axis` to the IMU axis
-that points up (0 x, 1 y, 2 z); the same axis is used for the rollover tilt. If it points
-down, flip the sign of `ag.gyro_scale` in the model and re-export.
+**IMU mounting**: only the vertical axis matters. Set `gyro_yaw_axis` in the model's
+`sim_params.m` to the IMU axis that points up (0 x, 1 y, 2 z) and re-export; it reaches
+`pose.conf` as `est.gyro_yaw_axis` and the same axis is used for the rollover tilt. If it
+points down, flip the sign of `ag.gyro_scale` in the model and re-export.
 
 Logs: `/var/lib/olympus-pose/runs/<YYYYmmdd-HHMMSS>/` (persistent; `/var/log` is in RAM on the
 rover image)
@@ -142,8 +161,10 @@ Both `RAW:` frames are accepted; the version of each frame is logged (`frame_ver
 **Time base.** Both firmwares advance `tick` by 20 per loop, but the v3.0 loop really takes
 ≈ 37 ms (LLC clock scale ≈ 1.87, column `llc_clock_scale` of `stats.csv`). With the default
 `est.dt_source = 0` (LLC tick) the encoder turn rate is then overestimated and the heading
-is wrong (DESIGN.md §10.4). **Set `est.dt_source = 1` (HLC arrival time from `llcmux`)
-until the firmware loop is timer-driven.** Replays of `llcmux` recordings and of converted
+is wrong (DESIGN.md §10.4). **Use `dt_source = 1` (HLC arrival time from `llcmux`) until
+the firmware loop is timer-driven:** set it in the model's `sim_params.m`, re-export, and
+it reaches `pose.conf` as `est.dt_source` (the model's full UMBmark: 45 % error with 0,
+1.34 %/0.50 % with 1; DESIGN.md §9.6). Replays of `llcmux` recordings and of converted
 captures carry the arrival times, so both settings can be compared on the same file.
 
 Bench captures from `capture_rover_data.py` can be replayed directly:
