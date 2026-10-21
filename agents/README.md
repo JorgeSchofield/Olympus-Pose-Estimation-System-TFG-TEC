@@ -25,6 +25,7 @@ olympus-pose:  acquisition → fusion → estimation → communication ← GPS (
 | `tools/llc_emulator.py` | RAW: generator (pty or file) for tests without the rover: firmware v3.0 or v2.20 frames, IMU loss, slow LLC clock |
 | `tools/capture_to_replay.py` | Turns a `raw_*.csv` of the LLC repo's `capture_rover_data.py` into a replay file |
 | `tools/pose_listen.py`, `tools/pose_ctl.py` | UDP pose viewer and control-port client |
+| `tools/gps_view.py`, `tools/gps_emulator.py` | GPS web viewer (live, log replay, GPX export) and NMEA emulator (DESIGN.md §11.4) |
 | `config/pose.conf` | Configuration: model parameters (from `export_pose_conf.m`) + application settings |
 | `tests/` | Host unit tests and the MATLAB↔C equivalence vectors |
 
@@ -103,6 +104,30 @@ time). Replay it through the app, without drops and reproducibly:
 ```bash
 olympus-pose -c /etc/olympus-pose/pose.conf -r DIR/<run>/llc_record.txt
 ```
+
+## GPS viewer
+
+The GPS is not used by the estimator; this shows that the GPS agent works (OE2,
+DESIGN.md §11.4). `olympus-pose` sends every fix to UDP 47003 (`io.udp_gps_port`). On the
+rover:
+
+```bash
+gps_view.py                      # then open http://<rover-ip>:8080 from a laptop
+```
+
+The page needs no internet. It shows the fix state, satellites, HDOP, fix rate (OE2: ≥ 1
+Hz), the scatter when the rover is still (CEP50 / 2DRMS) and the track in metres, and
+updates every second. For the thesis evidence: keep the rover still for 2 min, then walk
+it around a marked rectangle, and take a screenshot.
+
+```bash
+gps_view.py --csv /var/lib/olympus-pose/runs/<run>/gps.csv          # replay a logged run
+gps_view.py --csv gps.csv --gpx track.gpx --date 2026-10-21          # for Google Earth
+```
+
+**Indoors, without the module:** `gps_emulator.py --link /tmp/gps_emu` produces NMEA (set
+`io.gps_port = /tmp/gps_emu` and restart `olympus-pose`) to test the whole chain;
+`gps_emulator.py --udp 127.0.0.1:47003 --speedup 10` feeds the viewer alone, also on a PC.
 
 ## LLC firmware versions
 

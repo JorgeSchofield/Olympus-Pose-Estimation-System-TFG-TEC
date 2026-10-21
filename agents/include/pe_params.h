@@ -38,6 +38,7 @@ typedef struct {
 	char   udp_pose_host2[64];       /* optional second destination, "" = none */
 	int    udp_pose_port2;
 	int    udp_ctrl_port;            /* 0 disables the control port */
+	int    udp_gps_port;             /* GPS datagrams to udp_pose_host(2) on this port; 0 = off */
 	int    pose_decimation;          /* send every Nth estimate (1 = all) */
 	char   log_dir[PE_PATH_MAX];     /* a run sub-folder is created inside */
 

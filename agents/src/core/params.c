@@ -68,6 +68,7 @@ static const pdesc_t table[] = {
 	S("io.udp_pose_host2", udp_pose_host2),
 	I("io.udp_pose_port2", udp_pose_port2),
 	I("io.udp_ctrl_port", udp_ctrl_port),
+	I("io.udp_gps_port", udp_gps_port),
 	I("io.pose_decimation", pose_decimation),
 	S("io.log_dir", log_dir),
 	DO("est.t_init_s", t_init_s),
@@ -115,6 +116,7 @@ void pe_params_defaults(pe_params_t* p)
 	p->udp_pose_host2[0] = '\0';
 	p->udp_pose_port2 = 0;
 	p->udp_ctrl_port = 47002;
+	p->udp_gps_port = 47003;
 	p->pose_decimation = 1;
 	strcpy(p->log_dir, "/var/lib/olympus-pose/runs");   /* /var/log is tmpfs in poky */
 	p->t_init_s = 3.0;

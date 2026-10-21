@@ -289,6 +289,29 @@ static void test_misc(void)
 
 	CHECK(pe_crc32((const uint8_t*)"123456789", 9) == 0xCBF43926u, "CRC-32 check value");
 
+	/* GPS datagram (pose_dgram.h): layout and CRC as tools/gps_view.py decodes it */
+	{
+		pe_gps_msg_t g;
+		uint8_t d[PE_GPS_DGRAM_LEN];
+		double lat;
+		uint32_t crc;
+		memset(&g, 0, sizeof(g));
+		g.hdr.t_rx_ns = 0x0102030405060708ull;
+		g.lat_deg = 9.85612345;
+		g.lon_deg = -83.91234567;
+		g.utc_ms_of_day = 45296789u;
+		g.fix_quality = 1;
+		g.n_sats = 9;
+		g.valid = 1;
+		pe_gps_dgram_encode(&g, 7u, 42u, d);
+		memcpy(&lat, d + 16, sizeof(lat));   /* little-endian hosts only, as the targets */
+		crc = (uint32_t)d[76] | (uint32_t)d[77] << 8 | (uint32_t)d[78] << 16 | (uint32_t)d[79] << 24;
+		CHECK(memcmp(d, "OGP1", 4) == 0 && d[4] == 7 && d[8] == 0x08 && d[15] == 0x01
+			&& lat == g.lat_deg && d[64] == (uint8_t)(45296789u & 0xFF)
+			&& d[68] == 1 && d[69] == 9 && d[70] == 1 && d[72] == 42 && crc == pe_crc32(d, 76u),
+			"GPS datagram layout");
+	}
+
 	pe_hist_reset(&h);
 	for (i = 1; i <= 100; i++) {
 		pe_hist_add(&h, (double)i);

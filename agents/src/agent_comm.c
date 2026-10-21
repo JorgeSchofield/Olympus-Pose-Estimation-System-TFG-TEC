@@ -2,7 +2,8 @@
  * agent_comm.c - Communication agent (DESIGN.md §7.4, §11).
  *
  *   - publishes every pose_decimation-th estimate as a UDP datagram (PE-RF-012);
- *   - logs every estimate and every GPS fix with HLC timestamps (PE-RF-013);
+ *   - logs every estimate and every GPS fix with HLC timestamps (PE-RF-013),
+ *     and publishes each fix as a UDP datagram for tools/gps_view.py (§11.4);
  *   - serves the local control port (MARK, RESET_POSE, SUSPEND, RESUME, STATS);
  *   - once per second writes the validation statistics: per-link delivery and
  *     worst gap (PE-RNF-003), latency p50/p95/max (PE-RNF-002), pose interval
@@ -23,10 +24,10 @@
 
 static CyclicBehaviour beh;
 static Agent_Msg       msg;
-static pe_udp_dest_t   dest1, dest2;
-static int             have_dest2;
+static pe_udp_dest_t   dest1, dest2, gps_dest1, gps_dest2;
+static int             have_dest2, have_gps_dest1, have_gps_dest2;
 static int             ctrl_fd = -1;
-static uint32_t        dgram_seq, decim, n_pose, n_gps, n_gps_valid, last_pose_seq, last_gps_seq;
+static uint32_t        dgram_seq, gps_dgram_seq, decim, n_pose, n_gps, n_gps_valid, last_pose_seq, last_gps_seq;
 static pe_link_stats_t link_est, link_gps;
 static pe_hist_t       lat_hist, int_hist;
 static pe_clockfit_t   clockfit;
@@ -88,10 +89,19 @@ static void handle_pose(const pe_pose_msg_t* p)
 
 static void handle_gps(const pe_gps_msg_t* g)
 {
+	uint8_t d[PE_GPS_DGRAM_LEN];
+
 	pe_link_account(&link_gps, &last_gps_seq, g->hdr.seq);
 	n_gps++;
 	if (g->valid) {
 		n_gps_valid++;
+	}
+	pe_gps_dgram_encode(g, ++gps_dgram_seq, n_gps_valid, d);
+	if (have_gps_dest1) {
+		pe_udp_send(&gps_dest1, d, sizeof(d));
+	}
+	if (have_gps_dest2) {
+		pe_udp_send(&gps_dest2, d, sizeof(d));
 	}
 	pe_log_printf(g_log_gps, "%llu,%u,%.8f,%.8f,%.2f,%u,%u,%.2f,%.3f,%.2f,%u\n",
 		(unsigned long long)g->hdr.t_rx_ns, g->utc_ms_of_day, g->lat_deg, g->lon_deg, g->alt_m,
@@ -200,6 +210,12 @@ static void com_setup(CyclicBehaviour* b, void* arg)
 	}
 	if (g_params.udp_pose_host2[0] != '\0' && g_params.udp_pose_port2 > 0) {
 		have_dest2 = pe_udp_sender(&dest2, g_params.udp_pose_host2, g_params.udp_pose_port2) == 0;
+	}
+	if (g_params.udp_gps_port > 0) {
+		have_gps_dest1 = pe_udp_sender(&gps_dest1, g_params.udp_pose_host, g_params.udp_gps_port) == 0;
+		if (g_params.udp_pose_host2[0] != '\0') {
+			have_gps_dest2 = pe_udp_sender(&gps_dest2, g_params.udp_pose_host2, g_params.udp_gps_port) == 0;
+		}
 	}
 	if (g_params.udp_ctrl_port > 0) {
 		ctrl_fd = pe_udp_listener(g_params.udp_ctrl_port);
