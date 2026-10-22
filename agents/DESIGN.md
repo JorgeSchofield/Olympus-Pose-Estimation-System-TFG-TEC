@@ -970,6 +970,16 @@ The page shows:
 - the track, broken where the fix was lost;
 - 10-minute charts of satellites and HDOP, and a table of the latest fixes.
 
+**Load on the HLC.** In `olympus-pose` the datagram costs one encode and one non-blocking
+send per fix (1 Hz), negligible; `io.udp_gps_port = 0` removes it. The viewer is a
+separate, normal-priority process, so it cannot delay the `SCHED_FIFO` pose threads, and it
+only runs while someone needs the page. It computes the track once per fix, and the page
+asks for just the points it does not have yet (`/state?epoch=&since=`). A refresh then costs
+about 1.5 ms and 12 KB (measured on a PC) whatever the run length; the first version
+resent the whole track and reached 89 ms and 811 KB per second after 5.6 h. To keep even
+that off the rover, run the viewer on the laptop: set `io.udp_pose_host2` to the laptop's
+address, and the GPS datagrams go there too.
+
 The same page replays a logged run (`--csv gps.csv`), and `--gpx` exports a run for Google
 Earth or any GIS tool. **`tools/gps_emulator.py`** produces NMEA into a pty (for the GPS
 agent) or the datagrams directly (for the viewer alone), so the chain can be shown

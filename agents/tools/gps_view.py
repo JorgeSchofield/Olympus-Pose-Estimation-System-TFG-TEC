@@ -27,6 +27,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 
 FMT = '<4sIQ6dI4BII'                 # 80 bytes, see src/core/pose_dgram.h
 SIZE = struct.calcsize(FMT)
@@ -50,77 +51,112 @@ def decode(data):
 
 
 class State:
+    """Fixes and the track, kept up to date as fixes arrive.
+
+    A refresh of the page must not cost more as the run gets longer: the track
+    (east/north, line breaks) is computed once per fix in add(), and snapshot()
+    sends only the track points the page does not have yet, plus windows of
+    fixed length (10 min of charts, 2 min of scatter, 10 table rows).
+    """
+
     def __init__(self, source):
         self.lock = threading.Lock()
         self.source = source
         self.live = source.startswith('UDP')
+        self.epoch = 0
         self.clear()
         self.rx = self.bad = self.lost = 0
         self.last_seq = None
 
     def clear(self):
+        self.epoch += 1        # tells the page to drop the track it holds
         self.fixes = []        # dicts with 't' = seconds on one monotonic base
+        self.track = []        # [e, n, t_rel, sats, utc_ms, brk, id] per valid fix
         self.origin = None
+        self.t0 = None
+        self.prev = None
+        self.next_id = 1
+        self.n = self.n_valid = 0
 
     def add(self, fx):
         with self.lock:
-            if fx['valid'] and self.origin is None:
-                self.origin = (fx['lat'], fx['lon'])
+            if self.t0 is None:
+                self.t0 = fx['t']
+            self.n += 1
+            if fx['valid']:
+                self.n_valid += 1
+                if self.origin is None:
+                    self.origin = (fx['lat'], fx['lon'])
+                e, n = self.en(fx['lat'], fx['lon'])
+                # brk = 1: the line must not join this fix to the previous valid one
+                p = self.prev
+                brk = int(p is None or not p['valid'] or fx['t'] - p['t'] > 5.0)
+                self.track.append([round(e, 3), round(n, 3), round(fx['t'] - self.t0, 1),
+                                   fx['sats'], fx['utc_ms'], brk, self.next_id])
+                self.next_id += 1
+                if len(self.track) > MAX_FIXES + 1000:   # trim in blocks, not per fix
+                    del self.track[:1000]
+            self.prev = fx
             self.fixes.append(fx)
-            if len(self.fixes) > MAX_FIXES:
-                del self.fixes[:len(self.fixes) - MAX_FIXES]
+            if len(self.fixes) > MAX_FIXES + 1000:
+                del self.fixes[:1000]
 
     def en(self, lat, lon):
         lat0, lon0 = self.origin
         k = math.pi / 180 * R_EARTH
         return ((lon - lon0) * k * math.cos(math.radians(lat0)), (lat - lat0) * k)
 
-    def snapshot(self):
+    def snapshot(self, epoch=0, since=0):
+        """State for the page. Track points with id > since only, unless the page
+        holds another epoch or points that were trimmed: then the full track."""
         with self.lock:
-            fx = list(self.fixes)
-            origin = self.origin
-            rx, bad, lost = self.rx, self.bad, self.lost
-        now = time.monotonic() if self.live else (fx[-1]['t'] if fx else 0.0)
-        out = {'source': self.source, 'live': self.live, 'rx': rx, 'bad': bad, 'lost': lost,
-               'n': len(fx), 'n_valid': sum(1 for f in fx if f['valid']), 'origin': origin,
-               'last': None, 'age_s': None, 'rate_hz': 0.0, 'track': [], 'series': [],
-               'recent': [], 'spread': None}
-        if not fx:
+            fx = self.fixes
+            out = {'source': self.source, 'live': self.live, 'rx': self.rx, 'bad': self.bad,
+                   'lost': self.lost, 'n': self.n, 'n_valid': self.n_valid, 'origin': self.origin,
+                   'epoch': self.epoch, 'full': True, 'last': None, 'age_s': None, 'rate_hz': 0.0,
+                   'track': [], 'series': [], 'recent': [], 'spread': None}
+            if not fx:
+                return out
+            now = time.monotonic() if self.live else fx[-1]['t']
+            last = fx[-1]
+            out['last'] = {k: last[k] for k in ('lat', 'lon', 'alt', 'hdop', 'speed', 'course', 'utc_ms',
+                                                'q', 'sats', 'valid')}
+            out['last']['quality'] = QUALITY.get(last['q'], str(last['q']))
+            out['age_s'] = max(0.0, now - last['t'])
+
+            # newest-first scans that stop at the edge of their window
+            def tail(seq, t_from, key):
+                i = len(seq)
+                while i > 0 and key(seq[i - 1]) >= t_from:
+                    i -= 1
+                return seq[i:]
+
+            recent = tail(fx, now - 10.0, lambda f: f['t'])
+            if len(recent) > 1:
+                out['rate_hz'] = (len(recent) - 1) / max(recent[-1]['t'] - recent[0]['t'], 1e-6)
+            t0 = self.t0
+            out['series'] = [[round(f['t'] - t0, 1), f['sats'], round(f['hdop'], 2), int(f['valid'])]
+                             for f in tail(fx, last['t'] - 600.0, lambda f: f['t'])]
+            out['recent'] = [{'t': round(f['t'] - t0, 1), 'utc_ms': f['utc_ms'], 'lat': f['lat'],
+                              'lon': f['lon'], 'sats': f['sats'], 'hdop': f['hdop'], 'q': f['q'],
+                              'valid': f['valid']} for f in fx[-10:]][::-1]
+
+            trk = self.track
+            if trk:
+                # scatter over the last 2 min: the receiver's precision when the rover is still
+                pts = tail(trk, last['t'] - t0 - 120.0, lambda q: q[2])
+                if len(pts) >= 10:
+                    me = sum(q[0] for q in pts) / len(pts)
+                    mn = sum(q[1] for q in pts) / len(pts)
+                    d = sorted(math.hypot(q[0] - me, q[1] - mn) for q in pts)
+                    drms = math.sqrt(sum(x * x for x in d) / len(d))
+                    out['spread'] = {'n': len(d), 'cep50': d[len(d) // 2], 'drms2': 2 * drms}
+                if epoch == self.epoch and since >= trk[0][6] - 1:
+                    out['full'] = False
+                    out['track'] = tail(trk, since + 1, lambda q: q[6])
+                else:
+                    out['track'] = list(trk)
             return out
-        t0 = fx[0]['t']
-        last = fx[-1]
-        out['last'] = {k: last[k] for k in ('lat', 'lon', 'alt', 'hdop', 'speed', 'course', 'utc_ms',
-                                            'q', 'sats', 'valid')}
-        out['last']['quality'] = QUALITY.get(last['q'], str(last['q']))
-        out['age_s'] = max(0.0, now - last['t'])
-        recent = [f for f in fx if f['t'] >= now - 10.0]
-        if len(recent) > 1:
-            out['rate_hz'] = (len(recent) - 1) / max(recent[-1]['t'] - recent[0]['t'], 1e-6)
-        if origin is not None:
-            valid, brk, prev = [], [], None
-            for f in fx:
-                if f['valid']:
-                    # 1 = the line must not join this fix to the previous valid one
-                    brk.append(int(prev is None or not prev['valid'] or f['t'] - prev['t'] > 5.0))
-                    valid.append(f)
-                prev = f
-            pts = [self.en(f['lat'], f['lon']) for f in valid]
-            out['track'] = [[round(e, 3), round(n, 3), round(f['t'] - t0, 1), f['sats'], f['utc_ms'], b]
-                            for (e, n), f, b in zip(pts, valid, brk)]
-            # spread over the last 2 min: the receiver's precision when the rover is still
-            last_pts = [q for q, f in zip(pts, valid) if f['t'] >= last['t'] - 120.0]
-            if len(last_pts) >= 10:
-                me = sum(p[0] for p in last_pts) / len(last_pts)
-                mn = sum(p[1] for p in last_pts) / len(last_pts)
-                d = sorted(math.hypot(p[0] - me, p[1] - mn) for p in last_pts)
-                drms = math.sqrt(sum(x * x for x in d) / len(d))
-                out['spread'] = {'n': len(d), 'cep50': d[len(d) // 2], 'drms2': 2 * drms}
-        out['series'] = [[round(f['t'] - t0, 1), f['sats'], round(f['hdop'], 2), int(f['valid'])]
-                         for f in fx if f['t'] >= last['t'] - 600.0]
-        out['recent'] = [{'t': round(f['t'] - t0, 1), 'utc_ms': f['utc_ms'], 'lat': f['lat'], 'lon': f['lon'],
-                          'sats': f['sats'], 'hdop': f['hdop'], 'q': f['q'], 'valid': f['valid']}
-                         for f in fx[-10:]][::-1]
-        return out
 
 
 def udp_loop(state, port):
@@ -195,8 +231,14 @@ def make_handler(state):
         def do_GET(self):
             if self.path == '/' or self.path.startswith('/?'):
                 self._send(200, 'text/html; charset=utf-8', PAGE.encode('utf-8'))
-            elif self.path == '/state':
-                self._send(200, 'application/json', json.dumps(state.snapshot()).encode())
+            elif self.path == '/state' or self.path.startswith('/state?'):
+                q = parse_qs(urlsplit(self.path).query)
+                try:
+                    epoch, since = int(q.get('epoch', ['0'])[0]), int(q.get('since', ['0'])[0])
+                except ValueError:
+                    epoch = since = 0
+                body = json.dumps(state.snapshot(epoch, since), separators=(',', ':')).encode()
+                self._send(200, 'application/json', body)
             else:
                 self._send(404, 'text/plain', b'not found')
 
@@ -565,11 +607,21 @@ for (const [id, label] of [['sats', 'Satellites'], ['hdop', 'HDOP']]) {
 }
 $('clear').addEventListener('click', () => fetch('/clear', {method: 'POST'}).then(refresh));
 
+// The page keeps the track; each refresh brings only the points it does not have
+// (id > LAST_ID). A new epoch (track cleared on the rover) or a gap resends it all.
+let TRACK = [], EPOCH = 0, LAST_ID = 0;
+const MAX_TRACK = 20000;
 async function refresh() {
   try {
-    const r = await fetch('/state', {cache: 'no-store'});
+    const r = await fetch('/state?epoch=' + EPOCH + '&since=' + LAST_ID, {cache: 'no-store'});
     S = await r.json();
   } catch (e) { $('src').textContent = 'gps_view.py not reachable'; return; }
+  if (S.full) TRACK = S.track;
+  else for (const p of S.track) TRACK.push(p);
+  if (TRACK.length > MAX_TRACK) TRACK = TRACK.slice(TRACK.length - MAX_TRACK);
+  EPOCH = S.epoch;
+  LAST_ID = TRACK.length ? TRACK[TRACK.length - 1][6] : 0;
+  S.track = TRACK;
   tiles(S);
   drawTrack(S);
   drawSeries('sats', S, 1, v => v.toFixed(0), 12);
