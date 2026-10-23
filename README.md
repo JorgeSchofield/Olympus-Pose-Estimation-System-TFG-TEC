@@ -146,16 +146,16 @@ The MATLAB/Simulink reference model and the LLC firmware live in separate reposi
 
 ## Objectives and Status
 
-Indicators from the thesis (§1.3). Status as of 2026-10-22; evidence in
+Indicators from the thesis (§1.3). Status as of 2026-10-23; evidence in
 [`agents/DESIGN.md`](agents/DESIGN.md) §16 and §19.
 
 | Objective | Indicator | Status |
 |---|---|---|
 | **OE1** Electrical interface of the new sensors | I²C levels and rise time within spec (oscilloscope); 45 000 IMU reads at 50 Hz without errors | Not recorded in this repository |
-| **OE2** Acquisition and telemetry | LLC sends 6 encoders + IMU at ≥ 50 Hz on the HLC clock; GPS valid fixes at ≥ 1 Hz | **Not met yet**: firmware v3.0 sends at ≈ 26.7 Hz (software-counted loop, measured 2026-10-06). GPS agent and viewer in place, rate to be recorded |
+| **OE2** Acquisition and telemetry | LLC sends 6 encoders + IMU at ≥ 50 Hz on the HLC clock; GPS valid fixes at ≥ 1 Hz | **Not met yet**: the LLC loop is software-timed, 34.0 Hz on the rover (26.7 Hz with stall/over-current checks enabled). Needs the timer-driven loop (DESIGN.md §10.4). GPS sentences arrive at 1 Hz; valid fixes to be recorded outdoors |
 | **OE3** CMAES on Linux | Builds in the Yocto image; 45 000 messages at 50 Hz with register/suspend/resume, no failures, no memory growth | **Met** (2026-10-07, Raspberry Pi 5) |
-| **OE4** Agent application | ≥ 4 agents; 15 min at 50 Hz with ≥ 99 % delivery and ≤ 4 consecutive losses | Five agents implemented and unit-tested; 15-min delivery test to be recorded |
-| **OE5** Integration on Olympus | End-to-end latency < 100 ms for ≥ 15 min without failures | Runs on the rover image; 15-min latency record pending |
+| **OE4** Agent application | ≥ 4 agents; 15 min at 50 Hz with ≥ 99 % delivery and ≤ 4 consecutive losses | Five agents; on the rover 100 % delivery, 0 consecutive losses over 131 s at 34 Hz. The 15-min record at 50 Hz is still to do (emulator or fixed firmware) |
+| **OE5** Integration on Olympus | End-to-end latency < 100 ms for ≥ 15 min without failures | HLC latency p95 0.10 ms on the rover; end-to-end bound ≈ 59 ms worst case. 15-min record under vision load pending |
 | **OE6** Accuracy vs model and physical tests | 5 m straight, 360° spin, 2 m UMBmark: ≤ 3 % position (≤ 10.8° on the spin) against markers, and the same bounds against the simulation model | Pending: calibration and final runs. Model/app equivalence verified (identical poses on replay) |
 | **General** | Pose at ≥ 10 Hz; UMBmark final error ≤ 3 % (24 cm) | Pending (final runs) |
 

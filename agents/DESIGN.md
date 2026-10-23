@@ -874,6 +874,58 @@ clock (`llc_emulator.py --rate 26.7 --tick-ms 20`) replayed through the model en
 not, so the EKF fuses inconsistent rates. **Until the firmware loop is timer-driven,
 live tests must use `est.dt_source = 1`.**
 
+**Measurement on the rover (week 12, before the GUI/GPS/parity commits).** Firmware v3.0
+built with `all-bts7960,ramp-converge,idle-disable,no-stall,no-oc`; `llcmux` and
+`olympus-pose` on the rover image, 131 s of `stats.csv` and 11 870 frames of `llcmux`
+statistics (screenshots; the files were not kept):
+
+| Quantity | Value |
+|---|---|
+| `RAW:` interval (HLC clock, `llcmux`) | p50 28.1 ms, p99 45.0 ms, max 49.0 ms → **34.0 Hz** |
+| `llc_clock_scale` (k) | **1.465** (mean period 29.3 ms for 20 ms of tick) |
+| Agent links (acq, fus, est) | 4415 / 4415 / 4414 delivered, 0 lost, max gap 0, 0 drops, 0 log drops |
+| Poses | 4414 in 130.9 s = 33.7 Hz; pose interval p95 31.1 ms, max 48.0 ms |
+| HLC latency (`llcmux` arrival → pose published) | p50 0.10 ms, p95 0.10 ms, max 0.14 ms |
+| Process | 0.41 s CPU in 131 s; RSS 62 MB (thread stacks locked by `mlockall`) |
+| GPS | 130 sentences in 131 s, 0 valid (indoors, no fix) |
+
+The cycle decomposes exactly as the firmware schedule predicts: ≈ 8 ms of work every
+cycle (IMU read and the blocking ≈ 90-byte `RAW:` transmission, ≈ 7.5 ms at 115 200
+baud) plus the fixed `delay_ms(20)` gives the 28.1 ms median. Every 25th cycle adds the
+analog read (13 channels × 8 samples ≈ 10.8 ms, `SEN_READ_PERIOD`), and every 50th also
+the blocking TLM line (≈ 100 bytes, ≈ 8.7 ms, `TLM_PERIOD`), which gives the 39–49 ms tail.
+Mean ≈ 28.1 + 10.8/25 + 8.7/50 + 1.75/5 ≈ 29.0 ms, against 29.3 ms measured. The model's
+LLC predicted k = 1.53 (65 %); measured 1.465. The v3.0 captures of 2026-10-06 (k ≈ 1.87)
+came from a build with stall and over-current checks enabled: **k depends on the build
+features**, one more reason not to use the tick as a clock.
+
+**Firmware change required for OE2 (≥ 50 Hz) and for a usable tick** (LLC repository):
+
+1. **Timer-driven loop (required).** A 1 ms time base from the Timer0 overflow
+   interrupt (Timer0 already runs fast PWM with prescaler 64 in `all-bts7960`: one
+   overflow every 1.024 ms; enabling `TOIE0` does not change the PWM). The loop waits
+   for an absolute deadline (`next += 20`) instead of `delay_ms(20)`, and the frame tick
+   is that real time in ms. Cycles shorter than 20 ms then give exactly 50 Hz. An
+   occasional longer cycle is absorbed by the next one, because the deadline does not
+   move. With the measured work (8 ms; 18.8 ms on ADC cycles; 27.5 ms when ADC and TLM
+   coincide) the mean rate is 50.0 Hz.
+2. **Stagger the slow tasks (recommended, a few lines).** Start `tlm_counter` and
+   `sen_counter` with offsets so that TLM, the analog read and the HC-SR04 scan never
+   share a cycle. Worst cycle ≈ 18.8 ms, so no cycle overruns.
+3. **Interrupt-driven USART0 transmission (optional, robust).** It removes ≈ 7.5 ms of
+   blocking per cycle (≈ 8.7 ms more on TLM cycles) and leaves a wide margin. The
+   simulation model already has this option (`tx_mode = 'interrupt'`).
+
+Everything the firmware counts in cycles (stall threshold, PING watchdog, ramp steps) also
+becomes correct in real time. Today it runs ≈ 47 % slower than its constants say: the 2 s
+watchdog actually takes ≈ 2.9 s.
+
+**OE5 with these numbers:** the logged latency covers the HLC only (from the `\n` reaching
+`llcmux` to the published pose). End to end, the oldest sample in a frame (the IMU, read at
+the start of the cycle) waits at most one cycle plus the frame transmission, plus USB
+transfer. That is ≤ 49 + 7.5 + ≈ 2 + 0.14 ≈ 59 ms worst case today (≈ 10–15 ms typical),
+under the 100 ms limit. With the timer loop the bound drops to ≈ 30 ms.
+
 ---
 
 ## 11. External interfaces
