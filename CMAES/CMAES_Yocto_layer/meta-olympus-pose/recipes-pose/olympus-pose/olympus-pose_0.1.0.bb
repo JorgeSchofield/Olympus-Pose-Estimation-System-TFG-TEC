@@ -57,6 +57,9 @@ INITSCRIPT_PARAMS:${PN}-llcmux = "start 90 2 3 4 5 . stop 10 0 1 6 ."
 INITSCRIPT_NAME:${PN} = "olympus-pose"
 INITSCRIPT_PARAMS:${PN} = "start 91 2 3 4 5 . stop 09 0 1 6 ."
 
-# The Python test tools (pose_listen.py, pose_ctl.py, llc_emulator.py, capture_to_replay.py,
-# odom_calib.py, olympus-pose_gui.py: web server + JSON, gps_emulator.py).
-RDEPENDS:${PN} += "python3-core python3-csv python3-terminal python3-netserver python3-json"
+# The Python tools (pose_listen.py, pose_ctl.py, llc_emulator.py, capture_to_replay.py,
+# odom_calib.py, olympus-pose_gui.py, gps_emulator.py). Package of each module, from
+# poky scarthgap python3-manifest.json: csv, argparse, struct, binascii -> core;
+# socket -> io; random -> math; pty, tty -> terminal; json -> json; http.server ->
+# netclient + socketserver -> netserver (which pulls netclient).
+RDEPENDS:${PN} += "python3-core python3-io python3-math python3-terminal python3-json python3-netserver"
