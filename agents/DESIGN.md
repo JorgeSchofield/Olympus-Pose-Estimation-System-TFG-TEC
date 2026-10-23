@@ -3,10 +3,10 @@
 | Field | Value |
 |---|---|
 | Document | ARQ-PE-003 — Agent architecture and LLC→HLC data path (draft) |
-| Version | v0.8 — 2026-10-08 (week 10). v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
+| Version | v0.13 — 2026-10-22 (week 12). v0.13: web GUI `olympus-pose_gui.py` (pose, GPS, test markers, controls, logs, figures, GPX, replay) replaces the GPS viewer (§11.4). v0.12 (2026-10-21): the simulation model and the application now run the same estimation chain (§9.6): event-driven estimator by default in the model, v3.0 frame and `imu_ok` in the simulated LLC, one parser rule set, shared fusion inputs (`est.dt_source`, `est.gyro_yaw_axis` exported by the model); replay- and parser-parity tests V-U-9/V-U-10. v0.11: GPS fixes published as UDP datagrams; GPS web viewer, log replay and GPX export; GPS emulator (§11.4). v0.10 (2026-10-19): first tests on the rover image. `llcmux` pty A now writes whole lines with a leading `\n` (fix for `rover_bridge.recv_tlm()` losing TLM on a quiet link, §6.1); reference frames stated (§11.0); FR wheel counts 2.47 × FL, in the model and `pose.conf`; per-side calibration factors and `odom_calib.py` (§9.5); accelerometer vertical follows `est.gyro_yaw_axis`. v0.9: LLC firmware v3.0 (MPU-9250 driver, `RAW:` frame with `temp` and `imu_ok`, always emitted) supported next to v2.20 (§3.1.1); `est.dt_source` implemented after measuring the LLC clock scale k ≈ 1.87 on the v3.0 captures (§10.4); capture→replay converter, emulator v3/IMU-loss/slow-clock modes. v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
 | Covers | Deliverable "Documento de arquitectura multiagente y protocolo serial LLC-HLC" (OE2, OE4; milestone H2) and the design basis for the OE4/OE5/OE6 validation |
 | Sources | Thesis report *Olympus_pose_TFG.pdf* (ch. 1, 2.1.4–2.1.8, 3.1–3.4, 4); `requirements/DRT-SEP-001.md` v0.2; `requirements/ICD-PE-002.md` v1.0; LLC firmware v2.20 (`Alonso11/rover-low-level-controller`, `src/main.rs`); HLC image (`Alonso11/olympus-hlc-rpi5`, `olympus_hlc` v3.x, `rover_bridge`); CMAES pthreads port (`CMAES/libCMAES_pthreads`); simulation model v2.0 (`JorgeSchofield/olympus-pose-estimation-simulation`, folder `Simulation Model v2.0`) |
-| Status | Design only — no code yet. Section 17 lists the changes this design implies for the thesis report |
+| Status | Implemented (§19); first tests on the rover image 2026-10-19. Section 17 lists the changes this design implies for the thesis report |
 
 > **Requirement numbering.** This document uses the numbering of thesis §3.4.1
 > (PE-RF-006 … PE-RF-013, PE-RNF-001 … PE-RNF-008). The copy of DRT-SEP-001 in
@@ -67,6 +67,20 @@ Findings from reading `src/main.rs` and `src/sensors/mpu6050.rs`:
 | Timing inside the cycle | Encoders are read in the stall block, IMU read separately; both go out in the same frame | As modelled in §3.3.2 of the thesis |
 | Length | ≤ 82 bytes incl. `\n`; no checksum | Syntax check in acquisition, physical plausibility checks in fusion (§7.2) |
 | Link load | ≈ 82 B × 10 bit × 50 Hz ≈ 41 kbit/s ≈ 36 % of 115 200 baud, plus TLM | Acceptable; on the LLC this costs ≈ 7 ms of blocking TX per cycle (OE2 firmware topic) |
+
+#### 3.1.1 Firmware v3.0 frame (MPU-9250 driver, captures of 2026-10-06)
+
+```
+RAW:<tick>:<ax>:<ay>:<az>:<gx>:<gy>:<gz>:<encL>:<encR>:<temp>:<imu_ok>\n
+```
+
+| Item | v3.0 | Consequence for the HLC |
+|---|---|---|
+| Fields | Two fields **appended**: `temp` (int16, MPU-9250 die temperature, °C = temp/333.87 + 21) and `imu_ok` (0/1) | Acquisition accepts 9 (v2.20) or 11 fields (v3.0); a v2.20 frame is taken as `imu_ok = 1`. The version is carried in every message and logged (`frame_version`) |
+| Emission condition | **Always** emitted; with `imu_ok = 0` the six inertial fields are 0 | The odometry-only fallback of §13 (`IMU_INVALID`) is now reachable; `imu_bad_frames` counts these frames |
+| IMU | New MPU-9250 driver: gyro ±250 °/s (131 LSB/(°/s)), accel ±2 g, DLPF 10 Hz, WHO_AM_I 0x71/0x73 | `ag.gyro_scale` unchanged. The 10 Hz DLPF adds ≈ 15–20 ms of gyro group delay (to be checked against the model's 44 Hz) |
+| `tick` | Still +20 per loop iteration; measured real period ≈ 37 ms (26.7 Hz), **k ≈ 1.87** | With `dt_source = 0` the estimator's Δt is 53 % of the real one; see §10.4 |
+| Temperature | Sent, logged (`imu_temp_c` in `pose.csv`) | Closes ICD issue A-02 on the data side; a bias-vs-temperature model is not part of this version |
 
 ### 3.2 The serial port is owned exclusively by `olympus_hlc`
 
@@ -232,12 +246,12 @@ udev change is used, `llcmux --hw /dev/arduino_mega --pty-link /run/olympus/llc`
 
 **Rules**
 
-1. `poll()` on the real port and both pty masters. Serial bytes are forwarded to pty A as
-   soon as they are received, except at the start of a line: the first up to 4 bytes are
-   held until the prefix is known. If the prefix is `RAW:`, the whole line is withheld from
-   pty A (filter list configurable). Otherwise the held bytes and the rest of the line flow
-   through immediately. The added delay for `olympus_hlc` is at most 4 byte times
-   (≈ 0.35 ms).
+1. `poll()` on the real port and both pty masters. Lines for pty A are assembled whole;
+   a line whose first 4 bytes are `RAW:` is withheld from pty A. Every other line is
+   written to pty A in **one** `write()` as `"\n" + line + "\n"` (§6.1). Lines longer than
+   510 bytes are flushed and streamed through unchanged (counted as `long lines (A …)`).
+   The added delay for `olympus_hlc` is the line's own transmission time (≈ 2 ms for a
+   TLM line), irrelevant at its 1 Hz TLM rate.
 2. The `t_rx_ns` of a line is `CLOCK_MONOTONIC` taken when its `\n` is read.
 3. All writes to pty masters are **non-blocking**. On `EAGAIN` (reader absent or slow) the
    data is dropped and counted. The serial side is never blocked by a consumer.
@@ -251,6 +265,39 @@ udev change is used, `llcmux --hw /dev/arduino_mega --pty-link /run/olympus/llc`
 **Failure behaviour:** if `llcmux` dies, `olympus_hlc` gets EIO and stops sending PINGs.
 The LLC watchdog enters FAULT within 2 s and cuts the motors (fail-safe). If
 `olympus-pose` dies, the mux keeps serving `olympus_hlc` unaffected.
+
+### 6.1 Finding from the rover tests (2026-10-19): TLM lost on a quiet link
+
+**Symptom.** With `llcmux` between the LLC and `olympus_hlc`, TLM was not seen by
+`olympus_hlc` while the link was otherwise quiet (no command traffic).
+
+**Root cause** — in `rover_bridge` (`olympus-hlc-rpi5`, `rover-bridge/src/lib.rs`,
+`recv_tlm()`), not in the LLC or the mux:
+
+- the port is opened with a 100 ms read timeout, but `recv_tlm()` gives up after 50 ms,
+  and it checks that deadline only **before** each blocking 1-byte `read()`;
+- a byte arriving between 50 and 100 ms is read, appended to the local line buffer,
+  and then discarded when the loop sees the expired deadline. On the next cycle the line
+  starts with `LM:…` instead of `TLM:` and is thrown away as "something else";
+- with the first `llcmux` filter, a line was forwarded in pieces as it arrived from the
+  115 200 baud link, so a line could also straddle the deadline and be cut.
+
+With direct access to the port the same race exists, but the 50 Hz `RAW:` traffic of
+the old firmware made it rare that a TLM line was the first byte after a quiet gap;
+removing `RAW:` from pty A (D13) made the link quiet and exposed it.
+
+**Fix** (in `llcmux`, so no file of `olympus-hlc-rpi5` changes): every line goes to pty A
+complete, in one `write()`, preceded by an extra `\n`. If a `recv_tlm()` call times out
+in the middle of the read, the byte it consumes and drops is that `\n`. The line itself is
+already in the pty buffer and the next call reads it whole in well under 50 ms. An empty
+line is ignored by both `recv_tlm()` (returns `None`) and `send_command()` (accepts only
+`PONG`/`ACK:`/`ERR:`), so command responses are unaffected. Worst case, a TLM reaches
+`olympus_hlc` one control cycle later.
+
+**Upstream fix (recommended, not required):** in `recv_tlm()`, keep a partial line across
+calls (a buffer in the `Rover` struct) instead of a local `Vec`, or check the deadline
+after the `read()` and keep the byte. Either makes the bridge correct with or without
+`llcmux`.
 
 ---
 
@@ -278,9 +325,9 @@ Steps:
    up to the next `\n` (counted `frames_bad`).
 2. Parse the optional `@<t_rx_ns>` prefix. If absent (direct serial or bench use), stamp
    `CLOCK_MONOTONIC` locally and set `RX_TS_LOCAL`.
-3. Accept only `RAW:`. Require exactly 9 numeric fields after the prefix, base-10, no
-   trailing characters, `tick` within uint32, IMU fields within int16, encoders within
-   int32. Any violation → discard and count. No physical plausibility checks here: those
+3. Accept only `RAW:`. Require exactly 9 (v2.20) or 11 (v3.0, §3.1.1) numeric fields
+   after the prefix, base-10, no trailing characters, `tick` within uint32, IMU fields and
+   `temp` within int16, encoders within int32, `imu_ok` 0 or 1. Any violation → discard and count. No physical plausibility checks here: those
    belong in fusion.
 4. Fill the next free buffer, `hdr.seq = ++seq`, and send with timeout 0. On failure,
    count `drops_out` and **keep the same buffer** for the next frame.
@@ -438,7 +485,8 @@ stall never blocks the agent. If the ring overflows, records are dropped and cou
   kernel messages and a login getty would share the line with the GPS.
 
 Validates the checksum and fix status (RMC `A`, GGA quality > 0) and timestamps at the end
-of the sentence with `CLOCK_MONOTONIC`. It combines RMC+GGA of the same epoch into one fix
+of the sentence with `CLOCK_MONOTONIC`. The communication agent logs each fix and
+publishes it for the GPS viewer (§11.4). It combines RMC+GGA of the same epoch into one fix
 message, counts the fix rate (OE2: ≥ 1 Hz) and never feeds the filter (PE-CON-001 /
 thesis §1.6).
 
@@ -656,6 +704,102 @@ Two findings from reading the model (also listed in §17.14):
 - `sep_ekf_params.slip_thresh = 0.10 rad/s` (marked TBD), while thesis §3.2.9 argues for
   0.006 rad/s at 2.9 cm/s. Update the parameter or the text so they agree.
 
+### 9.5 Encoder scale: FR/FL difference and per-side calibration (2026-10-19)
+
+**How distance is computed.** The LLC sends one count sum per side
+(`encR = FR+CR+RR`, `encL = FL+CL+RL`). Fusion converts each side with one constant,
+`Δs_side = ΔC_side · m_per_tick_side`, and the estimator uses
+`Δs = (Δs_R + Δs_L)/2` for position and the gyro for heading (the encoder heading
+`(Δs_R − Δs_L)/B_eff` only enters as a weak measurement). So **distance depends only on
+the two constants**; heading errors from side asymmetry are corrected by the gyro, scale
+errors are not.
+
+`sep_geo_params` derives each constant from the per-wheel measurements,
+`m_per_tick_side = k_cal_side · sign_side / Σ_i N_i/(2π R_i)`.
+
+**FR/FL finding.** The front right wheel counts 2.47 × the pulses per revolution of the
+front left one. The model now sets `N_FR = 2.47 · N_FL` (the bench value of FR, 43 698,
+is replaced; `geo.ratio_FR_FL`). The right side gives 1.66 × more counts per metre than
+before (`geo.m_per_tick_R` −2.451e-6 → −1.474e-6), and the sides now differ by ≈ 60 %.
+
+| If the true rover has… | …and `pose.conf` assumes | the app reads a 0.60 m run as |
+|---|---|---|
+| FR = 2.47 × FL | bench values (old `pose.conf`) | 0.80 m (+33 %) |
+| bench values | FR = 2.47 × FL (new `pose.conf`) | 0.48 m (−20 %) |
+| FR = FL / 2.47 | bench values | 0.55 m (−8 %) |
+
+The first trials reported 0.50 m for 0.60 m measured (−17 %), **which the 2.47 × finding
+does not explain**: with that wheel counting more, the old constants would have read long,
+not short. Lost counts at the encoder interrupts (six Hall channels, ≈ 4 000 edges/s per
+wheel at full speed, plus the I²C IMU read in v3.0), a loaded wheel diameter smaller than
+measured, or FR counting *fewer* pulses would read short. That run cannot be re-analysed
+without its recording, so the per-wheel model is not trusted for scale.
+
+**Per-side calibration (new).** `agents/tools/odom_calib.py` measures both constants on
+the rover from recorded straight runs of known length. For each run, with the gyro
+heading change Δθ (integrated on HLC arrival time, bias from the rest before the run):
+
+```
+m_R · ΔC_R = D + B_eff·Δθ/2        m_L · ΔC_L = D − B_eff·Δθ/2
+```
+
+and several runs are combined by least squares. A spin of known turns then gives
+`B_eff` (χ) and a gyro scale check. The results are written back as `k_cal_R`, `k_cal_L`
+(and `chi`) in `sep_geo_params.m`, so `pose.conf` still comes only from the model.
+Verified on emulated runs with a right side 20 % off: `k_cal_R = 1.1997`, residual 0 mm,
+`B_eff` within 0.05 %.
+
+**Procedure** (V-OE6-0, before the OE6 runs): `llcmux --record-dir`; 3 straight runs of
+2 m forward with 3 s at rest before and after, distance measured with a tape between
+the same chassis point; 1 spin of one turn CCW in place, all in one `llcmux` recording
+(`odom_calib.py --list` numbers the motions); run `odom_calib.py`; update
+`sep_geo_params.m`; `export_pose_conf`; redeploy `pose.conf`; repeat one straight run as
+the check (error ≤ 2 %).
+
+### 9.6 Model and application: one estimation chain (2026-10-21)
+
+Both already ran the same fusion and estimation code (the C is generated from
+`sep_fusion_step`/`sep_estimation_step`, V-U-3/V-U-5). What differed was the HLC around
+that core in the model (`hlc_step.m`):
+
+| | Model before | Application | Now, both |
+|---|---|---|---|
+| Estimator activation | Every 20 ms (`est_policy = 'periodic'`) | On every fusion message (D3) | **Event-driven**; `'periodic'` kept only to reproduce thesis Table 3.7 |
+| Frame | Simulated LLC sends v2.20 (9 fields) | Parses v2.20 and v3.0 | Simulated LLC sends **v3.0** (`llc.frame_version`); same parser rules |
+| IMU validity | Always `true` to fusion | `imu_ok` of the frame | `imu_ok` of the frame; the simulated LLC can lose the IMU (`llc.imu_fail_t0/t1`) |
+| Parser | 9 fields, no range or trailing-character checks | `pe_raw_parse` | `raw_frame_from_bytes` is the mirror of `pe_raw_parse` |
+| Time base for Δt | LLC tick only | `est.dt_source` | Both; `est.dt_source` comes from the model |
+| IMU axes | gyro z, acc as is | `est.gyro_yaw_axis` | Both; `est.gyro_yaw_axis` comes from the model |
+
+**Shared code.** The two decisions between the parser and the generated fusion step
+(time base and IMU axes) are one function on each side: `hlc_fusion_inputs.m` in the
+model and `pe_fusion_inputs` / `pe_time_base_ms` (`src/core/pipeline.c`) in the
+application, which the acquisition and fusion agents call. `export_pose_conf` now writes
+`est.dt_source` and `est.gyro_yaw_axis` in section 1 of `pose.conf`, so the model is
+again the only source of every value that changes the estimate.
+
+**Replay.** `hlc_replay.m` runs a recording (`llcmux` record, converted capture or emulator
+file) through the model exactly as `olympus-pose -r` runs it: no message dropped,
+estimation once per fusion message. Its output has one row per published pose, so a rover
+run can be replayed in the app and in the model and compared row by row with `pose.csv`.
+
+**Verified** (tests/test_core.c):
+
+- V-U-9, parser parity: 5000 mutated v2.20/v3.0 lines; the C parser and the model's
+  parser accept the same 1429 and give the same values on every line.
+- V-U-10, replay parity: an emulator recording with the v3.0 slow clock (26.7 Hz, tick
+  +20 ms), a 6 s IMU loss, 1 % frame loss, a corrupted encoder value, an implausible jump,
+  an LLC reset, TLM lines, malformed lines and one v2.20 frame. With `dt_source = 0` and
+  `1` the C chain publishes the same 2381 and 2379 poses, at the same input lines, as
+  `hlc_replay`, worst relative difference 1.4e-17.
+
+**What the full simulation shows** (`run_sep_full_demo`, UMBmark both ways, Simulink =
+MATLAB to 0.0): with the simulated LLC clock at 65 % of real time, `dt_source = 0` ends
+45 % off with ≈ 100° of heading error, and `dt_source = 1` closes to **1.34 % (CW) and
+0.50 % (CCW)**, inside the 3 % requirement. The 45 % is not new: the previous model gave
+the same numbers. The default stays `dt_source = 0` (thesis §3.2.4) by decision of
+2026-10-21; live tests on firmware ≤ v3.0 must set 1 in `sim_params` and re-export.
+
 ---
 
 ## 10. Timing, scheduling and latency
@@ -715,13 +859,44 @@ tail-latency problem. They are image changes and must be agreed with the rover's
 `llcmux`/communication fit the regression t_rx ≈ a + k·tick over a sliding window
 (default 60 s, robust to outliers), excluding gaps and LLC resets. k ≈ 1.0 means a correct
 LLC clock; the model predicts k ≈ 1/0.655 ≈ 1.53 for firmware v2.20. The value is logged
-every second. Parameter `dt_source = LLC_TICK | LLC_TICK_SCALED | HLC_RX` selects which
-Δt the estimator uses (default `LLC_TICK`, as decided in thesis §3.2.4), which lets the
-clock hypothesis be tested on recorded data without changing the firmware.
+every second. Parameter `est.dt_source` selects which Δt the estimator uses: `0` = LLC
+tick (default, as decided in thesis §3.2.4), `1` = HLC arrival time `t_rx` from `llcmux`.
+The raw tick is always kept (`llc_tick`) for the fit and the logs, so the clock hypothesis
+can be tested on recorded data without changing the firmware. (A `LLC_TICK_SCALED` option
+was dropped: with the measured k it gives nothing that `1` does not.)
+
+**Measurement (firmware v3.0, 2026-10-06).** Two 58 s captures: 1559 and 1542 frames,
+tick +20 per frame, host period ≈ 37 ms (26.7 Hz) → **k = 1.86–1.90**, worse than the
+predicted 1.53 (the v3.0 loop does more I²C and TX work). An emulated UMBmark with that
+clock (`llc_emulator.py --rate 26.7 --tick-ms 20`) replayed through the model ends with
+θ = −168° and a 4.9 m closure error with `dt_source = 0`, and closes to 4 cm / 0.1° with
+`dt_source = 1`: the encoder rate ω_enc = Δθ/Δt is overestimated by k while the gyro is
+not, so the EKF fuses inconsistent rates. **Until the firmware loop is timer-driven,
+live tests must use `est.dt_source = 1`.**
 
 ---
 
 ## 11. External interfaces
+
+### 11.0 Reference frames of the published pose
+
+As defined in thesis §2.1 (figure 2.1), and unchanged by this design:
+
+- **{W}, navigation frame:** fixed to the ground, set by the rover's pose when the
+  estimator starts (or at `pose_ctl.py RESET`). **x points where the rover's front pointed
+  at that moment, y to its left**, θ = 0 along x and positive counter-clockwise seen from
+  above (right-handed, z up; the ROS REP-103 convention).
+- **{B}, body frame:** x forward, y left, z up.
+
+So driving straight ahead from the start increases **x**, not y; a CCW turn of 90° and
+then straight ahead increases y. Driving forward and seeing x grow is correct behaviour.
+A display that wants "forward = up the screen" should plot (−y, x), not change the
+estimator. The first rover tests (2026-10-19) read this as swapped X/Y axes.
+
+The IMU axes are a separate matter: only the gyro axis given by `est.gyro_yaw_axis`
+(with the sign in `ag.gyro_scale`) and, since v0.10, the same accelerometer axis (tilt for
+`ROLLOVER`) are used. A temporary IMU mounting only needs `est.gyro_yaw_axis` set to the
+axis that points up, and the sign flipped if it points down.
 
 ### 11.1 Pose datagram (UDP, little-endian, 128 bytes, version 1)
 
@@ -764,6 +939,71 @@ frames the app rejected). Both share `t_rx_ns`, so they join exactly.
 `MARK <text>`, `RESET_POSE [x y θ]`, `SUSPEND <agent>`, `RESUME <agent>`, `STATS`
 (replies with the latest stats line).
 
+### 11.4 GPS datagram and web GUI (added 2026-10-21, GUI 2026-10-22)
+
+The GPS never enters the estimator (thesis §1.6), but OE2 asks to show that it works.
+Besides `gps.csv`, the communication agent publishes every fix epoch as an 80-byte
+datagram on its own UDP port (`io.udp_gps_port`, default 47003; 0 = off), to the same
+host(s) as the pose datagram. The pose port and its decoders are unchanged.
+
+| Offset | Type | Field |
+|---|---|---|
+| 0 | char[4] | magic `"OGP1"` |
+| 4 | u32 | seq (gaps = lost datagrams) |
+| 8 | u64 | t_rx_ns (HLC `CLOCK_MONOTONIC`, end of the epoch: same clock as the pose) |
+| 16 | f64 ×2 | lat_deg, lon_deg |
+| 32 | f64 ×4 | alt_m, hdop, speed_mps, course_deg |
+| 64 | u32 | utc_ms_of_day |
+| 68 | u8 ×4 | fix_quality, n_sats, valid, reserved |
+| 72 | u32 | valid fixes so far |
+| 76 | u32 | CRC-32 (IEEE) of bytes 0..75 |
+
+**`tools/olympus-pose_gui.py`** (2026-10-22; it replaces the first GPS-only viewer) runs
+on the rover next to `olympus-pose` and serves one web page (default port 8080) to any
+laptop on the rover's network. It needs no internet: plots are drawn in local metres. It
+listens to the pose datagrams (§11.1, so `pose_listen.py` and the GUI are alternatives on
+the same port), the GPS datagrams above, and talks to the control port (§11.3).
+
+| Tab | Content |
+|---|---|
+| Pose | Estimator state (waiting / initializing / running / stale), x, y, θ, distance, pose rate, status flags, the pose track in the pose frame (§11.0); from `STATS`: latency p95 (OE5), worst-link delivery and gap (OE4), LLC clock scale (§10.4) |
+| GPS | Fix state, satellites, HDOP, fix rate (OE2, ≥ 1 Hz), scatter of the last 2 min as CEP50/2DRMS (the receiver's precision with the rover still), the track broken at fix losses, 10-min satellite and HDOP charts, latest fixes |
+| Markers | Test points for the report: **Mark** stores the mean of the last 10 s of valid fixes and their 2DRMS, the pose at that moment, and sends `MARK <label>` so the run's `events.csv` has the same label at the same HLC time. Distances between consecutive markers, GPS and pose. Saved in `gui_marks.csv` next to the run folders |
+| Controls & files | `RESET_POSE`, `SUSPEND`/`RESUME` of the agents through the CMAES AMS (agent states from `STATS`), the run statistics, the logged runs with every file and a GPX per run to download |
+
+Every plot exports to **SVG** (vector, for the report) and **PNG** (slides), always in the
+light theme. The GPX holds the GPS track and the markers as named waypoints. `--run DIR`
+replays a logged run on the same page; its markers are rebuilt from the run's `MARK`
+events with the same rule (10 s GPS mean, pose at that time), and `--gpx` writes the GPX
+without starting the page.
+
+GPS markers show **where** each test was done and that the GPS is consistent. With a
+2-5 m scatter they do not measure test distances of 2-5 m; the tape stays the reference
+for OE6. The 10 s mean removes the fast noise but not the slow drift, so the page shows
+the 2DRMS of the averaged fixes, not a smaller "error of the mean".
+
+**Access and safety.** No password (decided 2026-10-22): anyone on the rover's network can
+use the controls; reset pose, suspend and marker deletion ask for confirmation. Only
+`RESET_POSE`, `SUSPEND`, `RESUME`, `STATS` and `MARK` can be sent; the rover is never
+driven from the GUI, and no service is started or stopped.
+
+**Load on the HLC.** In `olympus-pose` the GPS datagram costs one encode and one
+non-blocking send per fix (1 Hz), negligible; `io.udp_gps_port = 0` removes it. The GUI is
+a separate, normal-priority process, so it cannot delay the `SCHED_FIFO` pose threads, and
+it only runs while someone needs it. Tracks are built once per datagram (the pose track
+keeps a point every 1 cm of motion) and the page asks only for the points it does not
+have (`/api/state?pe=&ps=&ge=&gs=`). A GPS refresh costs about 1.5 ms and 12 KB (measured
+on a PC) whatever the run length; the first GPS viewer resent the whole track and reached
+89 ms and 811 KB per second after 5.6 h. Decoding 25-50 pose datagrams per second is
+well under 1 % of a core. For the OE5 latency runs the GUI is simply not started.
+
+**`tools/gps_emulator.py`** produces NMEA into a pty (for the GPS agent) or the datagrams
+directly (for the GUI alone), so the chain can be shown indoors. Its sentences were
+checked against the app's own NMEA parser (300 epochs, 0 rejected). The GUI was tested
+against a stand-in that sends the app's datagrams, answers the control port like
+`agent_comm.c` and writes a run folder in the app's formats (live, markers, controls,
+downloads, GPX, figure export, replay).
+
 ---
 
 ## 12. Configuration parameters (`/etc/olympus-pose/pose.conf`)
@@ -787,8 +1027,8 @@ are the model field names.
 | | `dt_min`, `dt_max` | 1 ms, 500 ms | — |
 | Fusion `fprm.*` | `gyro_scale` (sign included), `yaw_axis`, `acc_scale` | (π/180)/131, z, 9.80665/16384 | DER (firmware ±250 °/s, ±2 g); axis/sign TBD by hand rotation |
 | | `dt_reject` (`dtick_max`), `dcount_reject` (`rate_max_counts_s`), `reset_window_counts`, `K_rereference`, `N_still`, `tilt_rollover` | 2000 ms, *TBD*, 1000, 3, 1, 30° | PROV |
-| Estimation `eprm.*` | `T_init`, `t_gap_max`, `dt_source` | 3 s, 10 s, `LLC_TICK` | PROV |
-| I/O | `raw_input`, `gps_port`, `gps_baud`, `udp_pose_dest`, `udp_ctrl_port`, `pose_decimation`, `log_dir` | `/run/olympus/llc_raw`, `/dev/ttyAMA0`, 9600, `127.0.0.1:47001`, 47002, 1, `/var/log/olympus-pose` | — |
+| Estimation `eprm.*` | `T_init`, `t_gap_max`, `dt_source` | 3 s, 10 s, `0` (LLC tick; use `1` with firmware ≤ v3.0, §10.4) | PROV |
+| I/O | `raw_input`, `gps_port`, `gps_baud`, `udp_pose_dest`, `udp_ctrl_port`, `udp_gps_port`, `pose_decimation`, `log_dir` | `/run/olympus/llc_raw`, `/dev/ttyAMA0`, 9600, `127.0.0.1:47001`, 47002, 47003, 1, `/var/lib/olympus-pose/runs` | — |
 | RT | `prio_*`, `cpu_pipeline`, `cpu_gps` | §10.1 | — |
 
 Unknown keys or missing required keys are a start-up error. The parsed set is written to
@@ -805,7 +1045,7 @@ Unknown keys or missing required keys are a start-up error. The parsed set is wr
 | Message dropped at a mailbox | Producer send fails / sequence gap | Next message carries the totals | `producer_drops`, `lost` |
 | LLC reset (power, DTR, watchdog reboot) | Tick backwards + counts near 0 | Re-reference, no jump in the pose | `LLC_RESET` |
 | IMU failure (fw v2.20) | No `RAW:` frames at all | Pose held, `STALE` after 100 ms; resumes on data | `STALE` |
-| IMU failure (future frame with `imu_ok`) | `IMU_VALID` = 0 | Odometry only, P grows | `IMU_INVALID` |
+| IMU failure (fw v3.0, `imu_ok = 0`) | `IMU_VALID` = 0 | Odometry only, P grows; `imu_bad_frames` counted | `IMU_INVALID` |
 | Long link interruption | Δt > `dt_max` (500 ms) | Integrate the exact Δs, Δθ in sub-steps of ≤ `dt_max`; only re-reference beyond `t_gap_max` | `GAP` |
 | Wheel slip on one side | δ > δ_th | Q inflated by γ (thesis §3.2.9) | `SLIP` |
 | Equal slip on all six wheels | Not detectable (thesis §3.2.9) | Documented limitation | — |
@@ -992,12 +1232,14 @@ Y1–Y3, Y5 and Y10 are done (2026-10-05). Y4, Y6–Y9 are hygiene and remain op
 | V-U-6 | PE-RF-010 | T | Bias changes only while `STILL` (model test replicated) | b̂ constant during motion |
 | V-U-7 | PE-RF-011 | T | Model scenario with 30 % slip on one side (and on all six wheels) | `SLIP` and γ > 1 during one-side slip; six-wheel slip not detected (documented) |
 | V-U-8 | PE-RF-007 | T | Buffer-pool stress: producer stamps a checksum, consumer adds random delays, 10⁶ messages | 0 corrupted payloads |
+| V-U-9 | PE-RF-008 | T | Parser parity: 5000 mutated v2.20/v3.0 lines through `pe_raw_parse` and the model's `raw_frame_from_bytes` (§9.6) | Same verdict and values on every line |
+| V-U-10 | PE-RF-009, PE-RF-010 | T | Replay parity: one recording through the app's chain (parser → `pipeline.c` → generated core) and through `hlc_replay.m`, with both time bases (§9.6) | Same poses at the same input lines; relative difference ≤ 1e-9 |
 | V-I-1 | PE-RF-008, D2 | T | SIL with forced drop probability 1–10 % on each mailbox (test build) | Final S **bit-identical** to the no-drop run; final pose difference within time-resolution effects |
 | V-I-2 | OE6 (simulation) | A | SIL with model-exported UMBmark (with 3 s pauses) | App pose vs model EKF within 1e-6 m; vs model ground truth within the model's own error |
 | V-OE4-1 | OE4 / PE-RF-006 | D | Start the app; trace registrations and messages | 5 agents registered; every link active |
 | V-OE4-2 | OE4 / PE-RNF-003 | T | 15 min at 50 Hz (emulator) = 45 000 frames, with vision running (or `stress-ng` on cores 0–2) | Each link ≥ 99 % delivery, ≤ 4 consecutive losses |
 | V-OE2-1 | OE2 | T | 10 min on the rover, `llcmux` statistics/record | `RAW:` inter-arrival p99 ≤ 20 ms on the HLC clock; clock scale k reported (§10.4) |
-| V-OE2-2 | OE2 / PE-RF-013 | T | ≥ 300 s outdoors | Valid fixes at ≥ 1 Hz |
+| V-OE2-2 | OE2 / PE-RF-013 | T | ≥ 300 s outdoors, `olympus-pose_gui.py` open (§11.4): 2 min still, then a walk around a marked rectangle | Valid fixes at ≥ 1 Hz; scatter at rest (CEP50/2DRMS) and the track's shape recorded as evidence (screenshot + `gps.csv` + GPX) |
 | V-OE5-1 | OE5 / PE-RNF-002 | T | 15 min on the rover with `olympus_hlc` + vision running | p95 (and max reported) of the end-to-end latency < 100 ms; optional oscilloscope method |
 | V-OE5-2 | PE-RNF-001 | T | Same run | Pose interval p95 ≤ 100 ms |
 | V-OE5-3 | OE5 / PE-RNF-005 | T | Same run, extended to 60 min for margin | No agent restart or failure; RSS stable; no growing drop counters |
@@ -1021,7 +1263,7 @@ Y1–Y3, Y5 and Y10 are done (2026-10-05). Y4, Y6–Y9 are hygiene and remain op
 | PE-RF-007 (fixed-size messages, multi-buffer) | §8.1, D4 | V-U-8 |
 | PE-RF-008 (accumulators unconverted to their user) | §7.1, §8.2, D2 | V-U-1, V-I-1 |
 | PE-RF-009 (odometry, rest) | §7.2, §9.1 | V-U-3, V-U-4 |
-| PE-RF-010 (EKF, persistent x̂, P) | §7.3, §9.2 | V-U-5, V-U-6 |
+| PE-RF-010 (EKF, persistent x̂, P) | §7.3, §9.2 | V-U-5, V-U-6, V-U-10 |
 | PE-RF-011 (slip) | §7.3 step 3 | V-U-7, V-CAL-4 |
 | PE-RF-012 (publish pose) | §11.1 | V-OE5-2 (rate), decoder check |
 | PE-RF-013 (log pose + GPS, common clock) | §7.4, §7.5, §11.2 | V-OE2-2, log inspection |
@@ -1252,6 +1494,36 @@ alternatives raised during the design, including the adviser's, are on record:
 | GPS como quinto agente | Proceso aparte | Pose y referencia comparten reloj y registro (PE-RF-013) |
 | Núcleo en C generado con MATLAB Coder | Código escrito a mano | Una sola implementación del algoritmo, la del modelo de referencia |
 
+### 17.16 Findings of the first rover tests (2026-10-19)
+
+- **§3.3 / Table of rover parameters (counts per revolution):** state that the front right
+  wheel counts 2.47 × the front left one (hardware difference found when the rover was
+  built), that the model uses `N_FR = 2.47 · N_FL`, and that the side constant is
+  therefore asymmetric by ≈ 60 %. Explain that this does not bias heading (gyro) but does
+  bias distance if it is wrong, and that the constants are finally set by the straight-run
+  calibration (§9.5), with `k_cal_R`, `k_cal_L` and the results table.
+- **§3.4.2 *Canal de sensores*:** add the `llcmux` framing rule for pty A (whole lines,
+  leading `\n`) and the `recv_tlm()` race it works around (§6.1), as an integration finding.
+- **§2.1 / §3.4.6 pose output:** state the frame convention of the published pose
+  explicitly (x forward at start, y left, θ CCW; §11.0) next to the datagram fields, since
+  test users expected "forward = y".
+- **Chapter 4:** add the first-trial result (0.50 m read for 0.60 m) as the motivation for
+  the calibration step, and the corrected result once calibrated.
+
+### 17.17 Model and application estimate the same way (2026-10-21)
+
+- **§3.3.7 / Table 3.7:** the model's estimation agent is now event-driven by default,
+  like the application; state that the periodic (20 ms) results in the table are kept as
+  the comparison case, and add the event-driven latency (p95 16.9 ms).
+- **§3.3 (LLC model):** the simulated LLC sends the v3.0 frame with `temp` and `imu_ok`
+  and can simulate an IMU failure; the model's parser follows the same rules as the
+  application's.
+- **§3.4 / validation (OE6, "same bounds against the simulation model"):** cite the
+  replay-parity evidence (V-U-10): a recording run through the application and through
+  the model gives identical poses, so a rover run can be reproduced in MATLAB exactly.
+  Add the time-base result: UMBmark 45 % with the LLC tick as Δt against 1.34 %/0.50 %
+  with the HLC arrival time, while the LLC clock is software-counted (§9.6, §10.4).
+
 ---
 
 ## 18. Open items and risks
@@ -1268,20 +1540,24 @@ alternatives raised during the design, including the adviser's, are on record:
 | R-1 | LLC clock (65 % hypothesis) and ≈ 33 Hz frame rate with v2.20 | OE2, OE6 | §10.4 measures it; OE4 tested with the 50 Hz emulator meanwhile |
 | R-2 | Counts-per-revolution anomaly (Hall bounce) | λ, `rate_max_counts_s`, rest detection (bounce would prevent `STILL`) | V-CAL-1; inspect counts while stationary |
 | R-3 | Tail latency on a non-RT kernel with vision load and the powersave governor | OE5 | V-OE5-1 first; then optional `isolcpus`/governor (§10.1) |
-| R-4 | IMU failure stops all frames (fw v2.20) | DRT PE-RNF-009 | Report as a limitation, or propose sending the frame with an `imu_ok` field in a future firmware |
+| R-4 | ~~IMU failure stops all frames (fw v2.20)~~ — **closed by firmware v3.0** (`imu_ok`, §3.1.1) | DRT PE-RNF-009 | — |
+| R-5 | Distance scale: first trial read 0.50 m for 0.60 m (−17 %), not explained by the FR = 2.47 × FL finding (§9.5) | OE6 (≤ 5 % error) | V-OE6-0 straight-run calibration with `odom_calib.py`; compare the measured right/left counts-per-metre ratio with the model's 1.60 to confirm or reject the 2.47 × figure; if counts are lost, check edges/s at full speed against the ISR budget |
+| R-6 | `rover_bridge.recv_tlm()` drops a byte after its 50 ms deadline (§6.1) | `olympus_hlc` telemetry | Worked around in `llcmux`; report upstream |
 
 ---
 
-## 19. Implementation status (2026-10-08)
+## 19. Implementation status (2026-10-21)
 
 | Component | Where | Verified so far | Still to verify on target |
 |---|---|---|---|
-| Fusion / estimation core | Simulation repo, branch `step3-model`: `sep_fusion_step`, `sep_estimation_step` (+ init, message); generated into `agents/src/core/gen` by `codegen_hlc_core.m` | 13/13 model tests; full UMBmark results identical to the previous model; Simulink = MATLAB; generated C = MATLAB on 2591 frames (zero difference); strict C99 for aarch64 | — |
-| Parameters | `export_pose_conf.m` → section 1 of `agents/config/pose.conf` | Parser tests; equivalence test runs from the shipped file | — |
-| Agents + supervisor | `agents/src` | Cross-compiled for aarch64 with `-std=c99 -Wall -Wextra -Werror`; core unit tests (68 checks incl. parser fuzz) | Replay, 15 min live delivery test (V-OE4-1/2), latency (V-OE5-1) |
-| `llcmux` | `agents/tools/llcmux` | Cross-compiled | RAW filtering with `olympus_hlc`, DTR reset on open, reconnect (V-OE5-4/5) |
-| Emulator and tools | `agents/tools` | Emulated UMBmark replayed in MATLAB: distance exact (8.000 m), square closes to 1.65 % | Live pty mode on the RPi |
-| Yocto | `meta-olympus-pose/recipes-pose/olympus-pose`, udev bbappend, image bbappend | — | `bitbake olympus-pose`, boot with `llcmux` |
+| Fusion / estimation core | Simulation repo, branch `step3-model`: `sep_fusion_step`, `sep_estimation_step` (+ init, message); generated into `agents/src/core/gen` by `codegen_hlc_core.m` | 15/15 model tests; Simulink = MATLAB; generated C = MATLAB on 2591 frames (zero difference); strict C99 for aarch64. Model HLC = app chain (§9.6): parser parity on 5000 lines, replay parity on 2482 lines with both time bases (V-U-9/V-U-10) | — |
+| Parameters | `export_pose_conf.m` → section 1 of `agents/config/pose.conf` | Parser tests; equivalence test runs from the shipped file; FR = 2.47 × FL exported (2026-10-19); test vectors regenerated, C = MATLAB | Straight-run calibration `odom_calib.py` (§9.5), verified on emulated runs |
+| Agents + supervisor | `agents/src` | Cross-compiled for aarch64 with `-std=c99 -Wall -Wextra -Werror`; core unit tests (checks incl. v2.20 and v3.0 parser fuzz, 300 real v3.0 frames, parser and replay parity with the model) | Replay, 15 min live delivery test (V-OE4-1/2), latency (V-OE5-1) |
+| LLC firmware v3.0 support | Acquisition (9 or 11 fields), `imu_bad_frames`, `imu_temp_c`, `frame_version` in `pose.csv`; `est.dt_source` | Both 2026-10-06 captures parse completely; replayed in the model: 0 rejects; emulated IMU loss (10 s) handled as `IMU_INVALID` without gaps | Live run with the rover and `dt_source = 1` |
+| `llcmux` | `agents/tools/llcmux` | Run on the rover image with `olympus_hlc` (2026-10-19): RAW filtering works; TLM loss on a quiet link found and fixed by whole-line framing (§6.1); fix cross-compiled with `-Werror` | DTR reset on open, reconnect (V-OE5-4/5) |
+| Emulator and tools | `agents/tools`: `llc_emulator.py` (v3.0/v2.20 frames, `--imu-off`, `--tick-ms`), `capture_to_replay.py` | Emulated UMBmark replayed in MATLAB: distance exact (8.000 m), square closes to 1.65 %; slow-clock run reproduces the k ≈ 1.87 error and its `dt_source = 1` fix (§10.4) | Live pty mode on the RPi |
+| Web GUI | GPS datagram (`io.udp_gps_port`), `tools/olympus-pose_gui.py`, `tools/gps_emulator.py` (§11.4) | Datagram layout unit test; emulator NMEA accepted by the app's parser (300 epochs, 0 rejected); GUI tested against a stand-in of the app (datagrams, control port, run folder): live pose and GPS, markers with MARK in events.csv, reset/suspend/resume, file downloads, run and session GPX, SVG/PNG export, replay | On the Pi with the real app and GPS module (V-OE2-2) |
+| Yocto | `meta-olympus-pose/recipes-pose/olympus-pose`, udev bbappend, image bbappend | Image built and booted with `llcmux` and `olympus-pose` (2026-10-19). That image fetched SRCREV `aadf014` (the v3.0 support was not yet on `main`), so its parser accepted only 9-field frames | Rebuild after merging `master` into `main` |
 
 Implementation choices not in the earlier sections:
 
@@ -1290,9 +1566,9 @@ Implementation choices not in the earlier sections:
 - **Replay mode** (`olympus-pose -r file`) sends with `MAES_MAX_DELAY` and the log writer
   blocks instead of dropping, so a recorded run is processed completely and reproducibly.
   Latency columns are not meaningful in replay.
-- **Model default:** `sim_params` keeps `est_policy = 'periodic'` so the thesis figures stay
-  reproducible; the application is event-driven (D3), which in the model gives the same
-  accuracy and a lower latency (p95 16.9 ms against 27.9 ms).
+- **Model default:** since 2026-10-21 `sim_params` uses `est_policy = 'event'`, as the
+  application (D3), so both estimate the same way (§9.6); latency p95 16.9 ms against
+  34.7 ms with `'periodic'`, which stays available to reproduce the thesis figures.
 - **`ag.dt_reject`** rose from 0.5 s to 2.0 s: with cumulative messages a 2 s hole carries its
   exact distance and is sub-stepped (§9.2); longer jumps are treated as a corrupted tick.
 - **Slip threshold:** `slip_thresh` stays at the model value (0.10 rad/s) until LLC and HLC

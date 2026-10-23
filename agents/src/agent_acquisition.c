@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "line_buf.h"
+#include "pipeline.h"
 #include "port.h"
 #include "raw_parser.h"
 
@@ -21,7 +22,7 @@ static unsigned        pool_next;
 static uint32_t        seq;
 static pe_line_buf_t   lb;
 static int             fd = -1;
-static uint32_t        frames_ok, frames_bad, tlm_lines, drops;
+static uint32_t        frames_ok, frames_bad, tlm_lines, drops, imu_bad_frames;
 static uint64_t        rx_now_ns;
 static int             eof_seen;
 
@@ -44,6 +45,9 @@ static void on_line(void* ctx, const char* line, size_t len)
 		return;
 	}
 	frames_ok++;
+	if (!f.imu_ok) {
+		imu_bad_frames++;
+	}
 
 	m = &pool[pool_next];
 	memset(m, 0, sizeof(*m));
@@ -51,13 +55,21 @@ static void on_line(void* ctx, const char* line, size_t len)
 	m->hdr.version = 1;
 	m->hdr.seq = seq + 1u;
 	m->hdr.t_rx_ns = f.has_ts ? f.t_rx_ns : rx_now_ns;
-	m->t_llc_ms = f.tick;
+	m->llc_tick = f.tick;
+	/* est.dt_source = 1: the estimator's time base is the HLC arrival time, for
+	 * firmware whose tick does not count real time (measured 2026-10-06: the
+	 * v3.0 tick runs at ~53 % of real time). Plausibility and the reset check
+	 * then work on this clock; the raw tick still reaches the clock-scale fit. */
+	m->t_llc_ms = pe_time_base_ms(f.tick, m->hdr.t_rx_ns, g_params.dt_source);
 	m->enc_l = f.enc_l;
 	m->enc_r = f.enc_r;
 	memcpy(m->acc, f.acc, sizeof(m->acc));
 	memcpy(m->gyr, f.gyr, sizeof(m->gyr));
-	/* firmware v2.20 only sends RAW: when the IMU read succeeded */
-	m->flags = (uint8_t)(PE_RAW_IMU_VALID | (f.has_ts ? 0u : PE_RAW_RX_TS_LOCAL));
+	/* v3.0 carries imu_ok; v2.20 only sends RAW: when the IMU read succeeded */
+	m->flags = (uint8_t)((f.imu_ok ? PE_RAW_IMU_VALID : 0u) | (f.has_ts ? 0u : PE_RAW_RX_TS_LOCAL));
+	m->frame_version = (uint8_t)f.version;
+	m->temp_raw = f.temp_raw;
+	m->imu_bad_frames = imu_bad_frames;
 	m->line_len = (uint16_t)len;
 	m->frames_ok = frames_ok;
 	m->frames_bad = frames_bad;

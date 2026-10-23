@@ -50,13 +50,18 @@ enum { PE_RAW_IMU_VALID = 1u << 0, PE_RAW_RX_TS_LOCAL = 1u << 1 };
 
 typedef struct {
 	pe_hdr_t hdr;
-	uint32_t t_llc_ms;           /* LLC tick as sent */
+	uint32_t t_llc_ms;           /* time base for the estimator: LLC tick, or HLC arrival
+	                                (ms, wrapped to 32 bits) when est.dt_source = 1 */
+	uint32_t llc_tick;           /* LLC tick as sent (always) */
 	int32_t  enc_l, enc_r;       /* side accumulators, raw */
 	int16_t  acc[3], gyr[3];     /* raw IMU LSB */
 	uint8_t  flags;              /* PE_RAW_* */
-	uint8_t  reserved;
+	uint8_t  frame_version;      /* 2 = v2.20 (9 fields), 3 = v3.0 (11 fields) */
 	uint16_t line_len;
+	int16_t  temp_raw;           /* v3.0 IMU die temperature, raw; 0 in v2.20 */
+	uint16_t reserved;
 	uint32_t frames_ok, frames_bad, tlm_lines;  /* acquisition counters */
+	uint32_t imu_bad_frames;     /* v3.0 frames with imu_ok = 0 */
 	uint32_t producer_drops;
 } pe_raw_msg_t;
 
@@ -68,6 +73,11 @@ typedef struct {
 	pe_link_stats_t link_acq;    /* acquisition -> fusion, measured by fusion */
 	uint32_t        frames_ok, frames_bad;
 	uint32_t        rejects, rerefs, llc_resets;
+	uint32_t        imu_bad_frames;
+	int16_t         temp_raw;    /* newest frame */
+	uint8_t         frame_version;
+	uint8_t         reserved;
+	uint32_t        llc_tick;    /* LLC tick as sent, for the clock-scale fit */
 	uint32_t        producer_drops;
 } pe_odom_msg_t;
 
@@ -101,6 +111,11 @@ typedef struct {
 	pe_link_stats_t link_acq, link_fus;
 	uint32_t        frames_ok, frames_bad;
 	uint32_t        rejects, n_substeps, n_gaps;
+	uint32_t        imu_bad_frames;
+	int16_t         temp_raw;
+	uint8_t         frame_version;
+	uint8_t         reserved;
+	uint32_t        llc_tick;    /* LLC tick as sent */
 	uint32_t        producer_drops;
 } pe_pose_msg_t;
 

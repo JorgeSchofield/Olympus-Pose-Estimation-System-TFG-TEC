@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""LLC emulator: RAW: frames at 50 Hz for testing olympus-pose without the rover.
+"""LLC emulator: RAW: frames for testing olympus-pose without the rover.
 
-DESIGN.md §16.1 (SIL) and V-OE4-2. It plays a scripted motion and writes
-firmware-v2.20 frames
+DESIGN.md §16.1 (SIL) and V-OE4-2. It plays a scripted motion and writes the
+v3.0 frame of the MPU-9250 firmware (default)
 
-    RAW:<tick>:<ax>:<ay>:<az>:<gx>:<gy>:<gz>:<encL>:<encR>
+    RAW:<tick>:<ax>:<ay>:<az>:<gx>:<gy>:<gz>:<encL>:<encR>:<temp>:<imu_ok>
 
-into a pseudo-terminal (live, paced by the clock) or a file (as fast as
-possible, for `olympus-pose -r`). Counts and gyro LSB come from the same model
-parameters the app uses (pose.conf), so a perfect run should come back as the
-scripted path.
+or the firmware-v2.20 frame (--frame v2, first nine fields only) into a
+pseudo-terminal (live, paced by the clock) or a file (as fast as possible, for
+`olympus-pose -r`). Counts and gyro LSB come from the same model parameters the
+app uses (pose.conf), so a perfect run should come back as the scripted path.
 
 Examples (on the RPi, as root for the real-time settings of the app):
 
@@ -20,6 +20,11 @@ Examples (on the RPi, as root for the real-time settings of the app):
     # a recorded file for replay, with frame loss and one corrupted frame
     llc_emulator.py --out /tmp/run.txt --prefix --loss 0.005 --corrupt-at 20
     olympus-pose -c pose.conf -r /tmp/run.txt
+
+    # firmware v3.0 as measured on 2026-10-06: ~26.7 Hz real but the tick still
+    # advances 20 ms per frame (LLC clock at ~53 % of real time); IMU lost 10 s.
+    # Compare est.dt_source = 0 and 1 on the same file.
+    llc_emulator.py --out /tmp/slow.txt --prefix --rate 26.7 --tick-ms 20 --imu-off 60:70
 
 Scenarios: straight (5 m), spin (360 deg), umbmark (2 m square, CCW) - all start
 with 5 s at rest and have 3 s pauses, which the estimator needs to observe the
@@ -80,7 +85,15 @@ def main():
     ap.add_argument('--out', help='write to this file as fast as possible (replay mode)')
     ap.add_argument('--scenario', default='umbmark', choices=['straight', 'spin', 'umbmark'])
     ap.add_argument('--duration', type=float, default=0.0, help='s; repeat the scenario until then (0 = once)')
-    ap.add_argument('--rate', type=float, default=50.0, help='frames per second')
+    ap.add_argument('--rate', type=float, default=50.0, help='frames per second, real time')
+    ap.add_argument('--tick-ms', type=int, default=0,
+                    help='tick increment per frame (default 1000/rate). 20 with --rate 26.7 '
+                         'reproduces the clock error of firmware v3.0')
+    ap.add_argument('--frame', default='v3', choices=['v3', 'v2'],
+                    help='v3: 11 fields with temp and imu_ok (default); v2: firmware v2.20')
+    ap.add_argument('--imu-off', default='',
+                    help='START:END s with the IMU not answering (v3: imu_ok = 0 and zero '
+                         'inertial fields; v2: no frames at all, as that firmware did)')
     ap.add_argument('--prefix', action='store_true', help='add "@<t_rx_ns> " like llcmux')
     ap.add_argument('--bias', type=float, default=0.012, help='gyro bias, rad/s')
     ap.add_argument('--noise', type=float, default=0.00116,
@@ -100,7 +113,8 @@ def main():
     one = sum(s[0] for s in seg)
     total = a.duration if a.duration > 0 else one
     dt = 1.0 / a.rate
-    tick_ms = int(round(1000.0 * dt))
+    tick_ms = a.tick_ms if a.tick_ms > 0 else int(round(1000.0 * dt))
+    imu_off = tuple(float(x) for x in a.imu_off.split(':')) if a.imu_off else None
 
     if a.link:
         import pty
@@ -112,7 +126,8 @@ def main():
             os.remove(a.link)
         os.symlink(name, a.link)
         out = os.fdopen(master, 'wb', buffering=0)
-        print('llc_emulator: %s -> %s, %s for %.0f s at %.0f Hz' % (a.link, name, a.scenario, total, a.rate))
+        print('llc_emulator: %s -> %s, %s for %.0f s at %.1f Hz, frame %s'
+              % (a.link, name, a.scenario, total, a.rate, a.frame))
     else:
         out = open(a.out, 'wb')
 
@@ -146,8 +161,18 @@ def main():
             gz = max(-32768, min(32767, gz))
             if a.corrupt_at >= 0 and abs(t - a.corrupt_at) < dt / 2:
                 encL += 400               # plausible corrupted byte
-            line = 'RAW:%d:%d:%d:%d:%d:%d:%d:%d:%d' % (tick % 2 ** 32, rnd.randint(-40, 40),
-                                                      rnd.randint(-40, 40), 16384, 0, 0, gz, encL, encR)
+
+            imu_ok = not (imu_off and imu_off[0] <= t < imu_off[1])
+            ax, ay, az = rnd.randint(-40, 40), rnd.randint(-40, 40), 16384
+            if not imu_ok:
+                ax = ay = az = gz = 0
+            line = 'RAW:%d:%d:%d:%d:%d:%d:%d:%d:%d' % (tick % 2 ** 32, ax, ay, az, 0, 0, gz, encL, encR)
+            if a.frame == 'v3':
+                temp_raw = int(round((31.0 + t / 600.0 - 21.0) * 333.87)) if imu_ok else 0
+                line += ':%d:%d' % (temp_raw, 1 if imu_ok else 0)
+            elif not imu_ok:
+                line = None               # v2.20 sends no RAW: frame without the IMU
+
             if a.link:
                 target = t0 + t
                 now = time.monotonic()
@@ -156,9 +181,9 @@ def main():
                 t_ns = time.monotonic_ns()
             else:
                 t_ns = t_ns0 + int(t * 1e9)
-            if a.prefix:
-                line = '@%d %s' % (t_ns, line)
-            if rnd.random() >= a.loss:
+            if line is not None and rnd.random() >= a.loss:
+                if a.prefix:
+                    line = '@%d %s' % (t_ns, line)
                 out.write((line + '\n').encode())
             if a.tlm and k % int(a.rate) == 0:
                 tl = 'TLM:NORMAL:0:%dms' % tick

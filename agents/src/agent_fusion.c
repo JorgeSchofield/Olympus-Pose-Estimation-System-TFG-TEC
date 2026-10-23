@@ -10,6 +10,7 @@
 
 #include <string.h>
 
+#include "pipeline.h"
 #include "sep_fusion_init.h"
 #include "sep_fusion_step.h"
 
@@ -33,7 +34,7 @@ static void fus_action(CyclicBehaviour* b, void* arg)
 {
 	pe_raw_msg_t in;
 	pe_odom_msg_t* m;
-	double acc[3], llc_resets_before, rerefs_before;
+	double acc[3], gz, llc_resets_before, rerefs_before;
 	boolean_T emit = 0;
 	sep_odom_t odom;
 	(void)arg;
@@ -48,13 +49,12 @@ static void fus_action(CyclicBehaviour* b, void* arg)
 	pe_link_account(&link_acq, &last_in_seq, in.hdr.seq);
 	link_acq.producer_drops = in.producer_drops;
 
-	acc[0] = in.acc[0];
-	acc[1] = in.acc[1];
-	acc[2] = in.acc[2];
+	/* Yaw axis and vertical accelerometer axis from est.gyro_yaw_axis
+	 * (pipeline.c; the model does the same in hlc_fusion_inputs.m). */
+	pe_fusion_axes(in.acc, in.gyr, g_params.gyro_yaw_axis, &gz, acc);
 	llc_resets_before = fst.n_llc_reset;
 	rerefs_before = fst.n_reref;
-	sep_fusion_step(&fst, (double)in.t_llc_ms, (double)in.enc_l, (double)in.enc_r,
-		(double)in.gyr[g_params.gyro_yaw_axis], acc,
+	sep_fusion_step(&fst, (double)in.t_llc_ms, (double)in.enc_l, (double)in.enc_r, gz, acc,
 		(boolean_T)((in.flags & PE_RAW_IMU_VALID) != 0),
 		&g_params.geo, &g_params.ag, &odom, &emit);
 
@@ -81,6 +81,10 @@ static void fus_action(CyclicBehaviour* b, void* arg)
 	m->rejects = (uint32_t)fst.n_reject;
 	m->rerefs = (uint32_t)fst.n_reref;
 	m->llc_resets = (uint32_t)fst.n_llc_reset;
+	m->imu_bad_frames = in.imu_bad_frames;
+	m->temp_raw = in.temp_raw;
+	m->frame_version = in.frame_version;
+	m->llc_tick = in.llc_tick;
 	m->producer_drops = drops;
 
 	if (pe_send(b->msg, ag_est.AID(&ag_est), m, INFORM, pe_send_timeout())) {

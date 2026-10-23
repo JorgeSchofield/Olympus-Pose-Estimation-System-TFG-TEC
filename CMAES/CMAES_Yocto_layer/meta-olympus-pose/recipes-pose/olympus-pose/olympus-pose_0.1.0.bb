@@ -16,11 +16,16 @@ SRC_URI = "git://github.com/JorgeSchofield/Olympus-Pose-Estimation-System-TFG-TE
            file://llcmux.default \
 "
 
-# aadf014: first version of the application (agents/), logs on persistent
-# storage. The CMAES library is built from the SAME commit (agents/CMakeLists.txt adds ../CMAES), so the app
+# 4fea507: web GUI olympus-pose_gui.py (replaces gps_view.py); a5e816d: GPS viewer
+# cost; 7896ee5: model/app parity
+# (pipeline.c, est.* exported by the model); ec12765: GPS
+# viewer (gps_view.py, OGP1 datagrams); before that firmware v3.0 frame
+# (temp, imu_ok, est.dt_source), llcmux whole-line
+# framing for olympus_hlc, FR = 2.47 x FL, odom_calib.py.
+# The CMAES library is built from the SAME commit (agents/CMakeLists.txt adds ../CMAES), so the app
 # and the library can never drift apart. The fetcher requires SRCREV to be on
 # branch=main: merge the master->main pull request before running bitbake.
-SRCREV = "aadf01447883d5b83ad41bee175ba0f8d9a69fff"
+SRCREV = "4fea507de5fca4dd7d4fdd86fb392351ffd026b9"
 PV = "0.1.0+git"
 
 S = "${WORKDIR}/git"
@@ -52,5 +57,9 @@ INITSCRIPT_PARAMS:${PN}-llcmux = "start 90 2 3 4 5 . stop 10 0 1 6 ."
 INITSCRIPT_NAME:${PN} = "olympus-pose"
 INITSCRIPT_PARAMS:${PN} = "start 91 2 3 4 5 . stop 09 0 1 6 ."
 
-# The Python test tools (pose_listen.py, pose_ctl.py, llc_emulator.py).
-RDEPENDS:${PN} += "python3-core"
+# The Python tools (pose_listen.py, pose_ctl.py, llc_emulator.py, capture_to_replay.py,
+# odom_calib.py, olympus-pose_gui.py, gps_emulator.py). Package of each module, from
+# poky scarthgap python3-manifest.json: csv, argparse, struct, binascii -> core;
+# socket -> io; random -> math; pty, tty -> terminal; json -> json; http.server ->
+# netclient + socketserver -> netserver (which pulls netclient).
+RDEPENDS:${PN} += "python3-core python3-io python3-math python3-terminal python3-json python3-netserver"

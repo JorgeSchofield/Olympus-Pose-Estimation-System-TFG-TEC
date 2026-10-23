@@ -13,6 +13,15 @@
  *              ->  optional record (every line, same "@t " format), which
  *                    olympus-pose can replay with -r.
  *
+ * pty A is written one WHOLE line at a time, each preceded by an extra '\n'.
+ * rover_bridge.recv_tlm() gives up after 50 ms but its read blocks up to
+ * 100 ms, so on a quiet link the first byte of a line arriving in that gap is
+ * consumed and dropped, and the rest of the line no longer starts with "TLM:".
+ * The leading '\n' is the byte that gets sacrificed (an empty line, ignored
+ * by recv_tlm() and send_command()), and writing the whole line at once means
+ * it is never cut by the 50 ms deadline. See olympus-hlc-rpi5 rover-bridge
+ * src/lib.rs, recv_tlm(). The TLM reaches olympus_hlc at most one cycle later.
+ *
  * Never blocks on a consumer: writes to the ptys are non-blocking and a full
  * pty drops (and counts) instead of stalling the serial port. When pty A is
  * opened, DTR is pulsed on the real port so the Arduino resets exactly as it
@@ -71,10 +80,12 @@ static pty_t     pa, pb;
 static int       rec = -1;
 static volatile sig_atomic_t stop;
 
-/* filter for pty A: hold the first 4 bytes of each line to decide */
-static char      hold[4];
-static int       hold_len;
-static enum { F_HOLD, F_PASS, F_DROP } fstate = F_HOLD;
+/* filter for pty A: assemble each non-RAW line, then write "\n" + line + "\n"
+ * in one write. Lines longer than the buffer are streamed through unchanged. */
+#define A_LINE_MAX 510
+static char      aline[A_LINE_MAX + 2];
+static size_t    alen;
+static enum { F_HOLD, F_PASS, F_DROP, F_STREAM } fstate = F_HOLD;
 
 static pe_line_buf_t lb;
 static pe_hist_t     raw_int;
@@ -219,38 +230,69 @@ static void on_line(void* ctx, const char* line, size_t len)
 	}
 }
 
-/* Bytes for pty A: everything except whole lines that start with "RAW:".
- * Only the first 4 bytes of a line are held back (< 0.35 ms at 115200). */
-static size_t filter_a(const char* in, size_t n, char* out)
+/* Writes one complete line to pty A as "\n" + line + "\n" (see header). */
+static void emit_a(const char* line, size_t len)
 {
-	size_t i, o = 0;
+	char out[A_LINE_MAX + 4];
+	out[0] = '\n';
+	memcpy(out + 1, line, len);
+	out[len + 1] = '\n';
+	st.bytes_a += len + 2;
+	write_nb(&pa, out, len + 2, &st.drop_a);
+}
+
+/* Bytes for pty A: every line except those that start with "RAW:". */
+static void filter_a(const char* in, size_t n)
+{
+	char   stream[512];
+	size_t i, ns = 0;
 	for (i = 0; i < n; i++) {
 		char c = in[i];
 		switch (fstate) {
-		case F_HOLD:
+		case F_HOLD:                     /* first 4 bytes of a line */
 			if (c == '\n') {
-				memcpy(out + o, hold, (size_t)hold_len);
-				o += (size_t)hold_len;
-				out[o++] = c;
-				hold_len = 0;
+				emit_a(aline, alen);     /* line shorter than 4 bytes */
+				alen = 0;
 				break;
 			}
-			hold[hold_len++] = c;
-			if (hold_len == 4) {
-				if (memcmp(hold, "RAW:", 4) == 0) {
+			aline[alen++] = c;
+			if (alen == 4) {
+				if (memcmp(aline, "RAW:", 4) == 0) {
 					fstate = F_DROP;
 					st.raw_filtered++;
+					alen = 0;
 				}
 				else {
-					memcpy(out + o, hold, 4);
-					o += 4;
 					fstate = F_PASS;
 				}
-				hold_len = 0;
 			}
 			break;
-		case F_PASS:
-			out[o++] = c;
+		case F_PASS:                     /* rest of a non-RAW line */
+			if (c == '\n') {
+				emit_a(aline, alen);
+				alen = 0;
+				fstate = F_HOLD;
+			}
+			else if (alen < A_LINE_MAX) {
+				aline[alen++] = c;
+			}
+			else {                       /* too long: flush and stream the rest */
+				st.overflow++;
+				aline[alen] = '\0';
+				st.bytes_a += alen + 1;
+				{
+					char out[A_LINE_MAX + 2];
+					out[0] = '\n';
+					memcpy(out + 1, aline, alen);
+					write_nb(&pa, out, alen + 1, &st.drop_a);
+				}
+				alen = 0;
+				stream[ns++] = c;
+				fstate = F_STREAM;
+			}
+			break;
+		case F_STREAM:
+			stream[ns++] = c;
 			if (c == '\n') {
 				fstate = F_HOLD;
 			}
@@ -262,7 +304,10 @@ static size_t filter_a(const char* in, size_t n, char* out)
 			break;
 		}
 	}
-	return o;
+	if (ns > 0) {
+		st.bytes_a += ns;
+		write_nb(&pa, stream, ns, &st.drop_a);
+	}
 }
 
 static void print_stats(void)
@@ -270,13 +315,13 @@ static void print_stats(void)
 	fprintf(stderr,
 		"llcmux: hw %s | in %llu B, to A %llu B, cmds %llu B | RAW %lu (filtered %lu) TLM %lu other %lu | "
 		"RAW interval p50 %.1f p99 %.1f max %.1f ms (%.1f Hz) | drops A %lu B %lu | A %s, B %s | "
-		"reopen %lu, DTR %lu, long lines %lu\n",
+		"reopen %lu, DTR %lu, long lines %lu (A %lu)\n",
 		hw >= 0 ? "up" : "DOWN", st.bytes_in, st.bytes_a, st.bytes_cmd,
 		st.raw_lines, st.raw_filtered, st.tlm_lines, st.other_lines,
 		pe_hist_percentile(&raw_int, 50), pe_hist_percentile(&raw_int, 99), raw_int.max_ms,
 		raw_int.count ? 1000.0 * raw_int.count / raw_int.sum_ms : 0.0,
 		st.drop_a, st.drop_b, pa.open ? "open" : "closed", pb.open ? "open" : "closed",
-		st.hw_reopen, st.dtr_pulses, (unsigned long)lb.n_overflow);
+		st.hw_reopen, st.dtr_pulses, (unsigned long)lb.n_overflow, st.overflow);
 }
 
 static void set_rt(void)
@@ -353,7 +398,7 @@ int main(int argc, char** argv)
 				fprintf(stderr, "llcmux: opened %s\n", hw_path);
 				pe_line_buf_reset(&lb);
 				fstate = F_HOLD;
-				hold_len = 0;
+				alen = 0;
 				st.hw_reopen++;
 			}
 			else {
@@ -391,14 +436,11 @@ int main(int argc, char** argv)
 		now_ns = pe_now_ns();
 
 		if (ih >= 0 && q[ih].revents) {
-			char buf[512], outa[512];
+			char buf[512];
 			ssize_t n = read(hw, buf, sizeof(buf));
 			if (n > 0) {
-				size_t na;
 				st.bytes_in += (unsigned long long)n;
-				na = filter_a(buf, (size_t)n, outa);
-				st.bytes_a += na;
-				write_nb(&pa, outa, na, &st.drop_a);
+				filter_a(buf, (size_t)n);
 				pe_line_buf_feed(&lb, buf, (size_t)n, on_line, NULL);
 			}
 			else if (n == 0 || (errno != EAGAIN && errno != EINTR)) {

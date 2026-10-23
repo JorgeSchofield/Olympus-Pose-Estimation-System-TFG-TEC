@@ -67,6 +67,10 @@ static void publish(const pe_odom_msg_t* in, const double diag[3], uint16_t extr
 	m->rejects = in->rejects;
 	m->n_substeps = (uint32_t)est.n_substeps;
 	m->n_gaps = (uint32_t)est.n_gaps;
+	m->imu_bad_frames = in->imu_bad_frames;
+	m->temp_raw = in->temp_raw;
+	m->frame_version = in->frame_version;
+	m->llc_tick = in->llc_tick;
 	m->producer_drops = drops;
 
 	if (pe_send(&msg, ag_com.AID(&ag_com), m, INFORM, pe_send_timeout())) {

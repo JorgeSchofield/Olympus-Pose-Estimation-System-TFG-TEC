@@ -68,11 +68,13 @@ static const pdesc_t table[] = {
 	S("io.udp_pose_host2", udp_pose_host2),
 	I("io.udp_pose_port2", udp_pose_port2),
 	I("io.udp_ctrl_port", udp_ctrl_port),
+	I("io.udp_gps_port", udp_gps_port),
 	I("io.pose_decimation", pose_decimation),
 	S("io.log_dir", log_dir),
 	DO("est.t_init_s", t_init_s),
 	DO("est.stale_ms", stale_ms),
 	I("est.gyro_yaw_axis", gyro_yaw_axis),
+	I("est.dt_source", dt_source),
 	I("rt.prio_ams", prio_ams),
 	I("rt.prio_acq", prio_acq),
 	I("rt.prio_fus", prio_fus),
@@ -114,11 +116,13 @@ void pe_params_defaults(pe_params_t* p)
 	p->udp_pose_host2[0] = '\0';
 	p->udp_pose_port2 = 0;
 	p->udp_ctrl_port = 47002;
+	p->udp_gps_port = 47003;
 	p->pose_decimation = 1;
 	strcpy(p->log_dir, "/var/lib/olympus-pose/runs");   /* /var/log is tmpfs in poky */
 	p->t_init_s = 3.0;
 	p->stale_ms = 100.0;
 	p->gyro_yaw_axis = 2;
+	p->dt_source = 0;
 	p->prio_ams = 46;
 	p->prio_acq = 44;
 	p->prio_fus = 43;
@@ -264,7 +268,8 @@ int pe_params_check(const pe_params_t* p, char* err, size_t errlen)
 			}
 		}
 	}
-	if (p->pose_decimation < 1 || p->gyro_yaw_axis < 0 || p->gyro_yaw_axis > 2) {
+	if (p->pose_decimation < 1 || p->gyro_yaw_axis < 0 || p->gyro_yaw_axis > 2 ||
+		p->dt_source < 0 || p->dt_source > 1) {
 		set_err(err, errlen, "io.pose_decimation must be >= 1 and est.gyro_yaw_axis 0..2%s%s", "", "");
 		return -1;
 	}

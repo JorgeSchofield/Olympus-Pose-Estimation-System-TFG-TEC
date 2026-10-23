@@ -20,9 +20,13 @@ olympus-pose:  acquisition → fusion → estimation → communication ← GPS (
 | `src/core/` | Portable C99: RAW and NMEA parsers, `pose.conf` parser, statistics, UDP datagram |
 | `src/core/gen/` | **Generated** by MATLAB Coder (`codegen_hlc_core.m` in the simulation repo). Never edit by hand |
 | `src/port/` | The only Linux-specific code: serial/pty, UDP, async log writer, memory locking |
-| `tools/llcmux/` | LLC link multiplexer (DESIGN.md §6) |
-| `tools/llc_emulator.py` | 50 Hz RAW: generator (pty or file) for tests without the rover |
+| `tools/llcmux/` | LLC link multiplexer (DESIGN.md §6). Writes each line to `olympus_hlc` whole, with a leading `\n` (§6.1) |
+| `tools/odom_calib.py` | Per-side encoder calibration from recorded straight runs and spins (DESIGN.md §9.5) |
+| `tools/llc_emulator.py` | RAW: generator (pty or file) for tests without the rover: firmware v3.0 or v2.20 frames, IMU loss, slow LLC clock |
+| `tools/capture_to_replay.py` | Turns a `raw_*.csv` of the LLC repo's `capture_rover_data.py` into a replay file |
 | `tools/pose_listen.py`, `tools/pose_ctl.py` | UDP pose viewer and control-port client |
+| `tools/olympus-pose_gui.py` | Web GUI: pose, GPS, test markers, controls, logs, figures and GPX (DESIGN.md §11.4) |
+| `tools/gps_emulator.py` | GPS emulator (NMEA into a pty, or datagrams straight to the GUI) |
 | `config/pose.conf` | Configuration: model parameters (from `export_pose_conf.m`) + application settings |
 | `tests/` | Host unit tests and the MATLAB↔C equivalence vectors |
 
@@ -47,8 +51,23 @@ cmake --build build-core
 ./build-core/pe_tests
 ```
 
-Expected: `OK: 68 checks passed`, including the RAW parser fuzz (10⁶ mutations) and the
-generated C reproducing MATLAB on 2591 frames with zero difference.
+Expected: `OK: … checks passed, 0 failed`, including the RAW parser fuzz (10⁶ mutations
+each for the v2.20 and v3.0 frames), 300 real v3.0 frames (LLC clock scale ≈ 1.86), the
+generated C reproducing MATLAB on 2591 frames with zero difference, and the two
+**model/app parity** tests (DESIGN.md §9.6): the C parser and the model's parser agree on
+5000 mutated lines, and a recording run through the app's chain gives the same poses as
+the model's `hlc_replay.m`, with both time bases.
+
+**The model and the app estimate the same way.** The model's HLC (`hlc_step.m`) uses the
+same parser rules, the same fusion inputs (`hlc_fusion_inputs.m` = `src/core/pipeline.c`),
+event-driven estimation and the same parameters, including `est.dt_source` and
+`est.gyro_yaw_axis`, which are now exported by the model. To reproduce a rover run in
+MATLAB, replay its `llcmux` recording:
+
+```matlab
+R = hlc_replay('llc_record.txt');        % one row per pose, as pose.csv
+% columns: line t_rx_ns tick t_in S x y theta omega bias d1 d2 d3 still imu_ok
+```
 
 **After changing the model or its parameters** (in MATLAB, simulation repo,
 `Simulation Model v2.0`):
@@ -59,7 +78,11 @@ export_pose_conf                                    % then paste codegen/pose_mo
                                                     % into section 1 of config/pose.conf
 ```
 
-and regenerate the test vectors with `tests/matlab/export_core_vectors.m`.
+and regenerate the test vectors with `tests/matlab/export_core_vectors.m`,
+`export_replay_vectors.m` and (if the parser changed) `export_parser_vectors.m`. A
+change to the parser or to the fusion inputs must be made on both sides
+(`raw_frame_from_bytes.m` / `raw_parser.c`, `hlc_fusion_inputs.m` / `pipeline.c`); the
+parity tests fail otherwise.
 
 ## Running
 
@@ -67,13 +90,24 @@ and regenerate the test vectors with `tests/matlab/export_core_vectors.m`.
 /etc/init.d/llcmux start          # usually started at boot
 /etc/init.d/olympus-pose start
 olympus-pose -c /etc/olympus-pose/pose.conf --check     # validate a configuration
-pose_listen.py                    # live pose, one line per second
-pose_ctl.py MARK start of run 3   # event marker in the logs
-pose_ctl.py STATS
+olympus-pose_gui.py               # web page: http://<rover-ip>:8080 (see "Web GUI" below)
 ```
+
+Console alternatives: `pose_listen.py` (live pose, one line per second; not at the same
+time as the GUI, both listen on UDP 47001), `pose_ctl.py MARK start of run 3`,
+`pose_ctl.py STATS`.
 
 `olympus_hlc` is started by hand as before; it finds `/dev/arduino_mega` (now the
 `llcmux` pty) and needs no change.
+
+**Pose axes** (thesis §2.1, DESIGN.md §11.0): the origin and axes are the rover's pose when
+the estimator starts. **x = where the front pointed, y = to its left**, θ counter-clockwise.
+Driving straight ahead increases **x**; that is correct, not swapped axes.
+
+**IMU mounting**: only the vertical axis matters. Set `gyro_yaw_axis` in the model's
+`sim_params.m` to the IMU axis that points up (0 x, 1 y, 2 z) and re-export; it reaches
+`pose.conf` as `est.gyro_yaw_axis` and the same axis is used for the rollover tilt. If it
+points down, flip the sign of `ag.gyro_scale` in the model and re-export.
 
 Logs: `/var/lib/olympus-pose/runs/<YYYYmmdd-HHMMSS>/` (persistent; `/var/log` is in RAM on the
 rover image)
@@ -93,6 +127,67 @@ time). Replay it through the app, without drops and reproducibly:
 olympus-pose -c /etc/olympus-pose/pose.conf -r DIR/<run>/llc_record.txt
 ```
 
+## Web GUI
+
+`olympus-pose_gui.py` runs on the rover next to `olympus-pose` and serves one page to any
+laptop on the rover's network, with no internet needed (DESIGN.md §11.4):
+
+```bash
+olympus-pose_gui.py                                      # live: http://<rover-ip>:8080
+olympus-pose_gui.py --run /var/lib/olympus-pose/runs/<run>                 # replay a run
+olympus-pose_gui.py --run /var/lib/olympus-pose/runs/<run> --gpx run.gpx   # GPX, no page
+```
+
+| Tab | What it shows / does |
+|---|---|
+| Pose | Estimator state, x, y, θ, distance, pose rate, status flags, the pose track; latency p95 (OE5), worst-link delivery (OE4) and LLC clock scale from the app's `STATS` |
+| GPS | Fix state, satellites, HDOP, fix rate (OE2 ≥ 1 Hz), scatter at rest (CEP50/2DRMS), the track in metres, satellite/HDOP charts, latest fixes |
+| Markers | **Mark** with a label (stop the rover first): stores the 10 s average GPS position and its 2DRMS, the pose at that moment, and writes `MARK <label>` into the run's `events.csv`. Table with the distances between markers. Saved in `/var/lib/olympus-pose/gui_marks.csv` |
+| Controls & files | Reset pose, suspend/resume agents (through the CMAES AMS), run statistics, the logged runs with every file and a GPX per run to download |
+
+Each plot has **SVG** and **PNG** buttons: the figure is saved in the light theme, ready
+for the report and the slides. A GPX holds the track and the markers as named points, for
+Google Earth or any GIS tool.
+
+There is **no password**: anyone on the rover's network can use the controls; reset pose
+and suspend ask for confirmation. The rover is never driven from the GUI. It is a separate,
+normal-priority process: the pose threads (real-time priority) cannot be delayed by it, and
+a refresh costs the same after 5 min or 5 h. To keep it off the rover entirely during the
+OE5 latency tests, just don't start it.
+
+For the thesis evidence: keep the rover still for 2 min (GPS scatter), then mark the start
+and end of each test with a label, and save the figures.
+
+**Indoors, without the GPS module:** `gps_emulator.py --link /tmp/gps_emu` produces NMEA (set
+`io.gps_port = /tmp/gps_emu` and restart `olympus-pose`) to test the whole chain;
+`gps_emulator.py --udp 127.0.0.1:47003 --speedup 10` feeds the GPS tab alone.
+
+## LLC firmware versions
+
+Both `RAW:` frames are accepted; the version of each frame is logged (`frame_version` in
+`pose.csv`):
+
+| Firmware | Frame | IMU failure |
+|---|---|---|
+| v2.20 | `RAW:tick:ax:ay:az:gx:gy:gz:encL:encR` | no frames at all → `STALE` |
+| v3.0 (MPU-9250) | `…:encR:temp:imu_ok` | frames keep coming with `imu_ok = 0` → odometry only, `IMU_INVALID`, `imu_bad_frames` counts them |
+
+**Time base.** Both firmwares advance `tick` by 20 per loop, but the v3.0 loop really takes
+≈ 37 ms (LLC clock scale ≈ 1.87, column `llc_clock_scale` of `stats.csv`). With the default
+`est.dt_source = 0` (LLC tick) the encoder turn rate is then overestimated and the heading
+is wrong (DESIGN.md §10.4). **Use `dt_source = 1` (HLC arrival time from `llcmux`) until
+the firmware loop is timer-driven:** set it in the model's `sim_params.m`, re-export, and
+it reaches `pose.conf` as `est.dt_source` (the model's full UMBmark: 45 % error with 0,
+1.34 %/0.50 % with 1; DESIGN.md §9.6). Replays of `llcmux` recordings and of converted
+captures carry the arrival times, so both settings can be compared on the same file.
+
+Bench captures from `capture_rover_data.py` can be replayed directly:
+
+```bash
+capture_to_replay.py raw_20261006_183344.csv -o /tmp/cap.txt
+olympus-pose -c /etc/olympus-pose/pose.conf -r /tmp/cap.txt
+```
+
 ## Testing on a spare Raspberry Pi (no rover)
 
 Run as root (real-time priorities). Each step only needs the previous ones.
@@ -106,6 +201,14 @@ Run as root (real-time priorities). Each step only needs the previous ones.
    `pose.csv`: the 2 m square should close to roughly 1–3 % of 8 m, `s_m` = 8.000.
    In replay the `latency_ms` column is not meaningful (it compares recorded arrival times
    with the current clock); latency is measured live (step 2).
+   **Firmware v3.0 conditions** — slow LLC clock and a 10 s IMU loss:
+   ```bash
+   llc_emulator.py --out /tmp/slow.txt --prefix --rate 26.7 --tick-ms 20 --imu-off 60:70
+   ```
+   Replay it once with `est.dt_source = 0` and once with `1`: with `0` the square does not
+   close (heading off by ~170°), with `1` it closes to a few cm. Between 60 and 70 s
+   `pose.csv` must show `IMU_INVALID` (status bit) and `imu_bad_frames` rising by ≈ 267,
+   with no `GAP`.
 2. **Live, OE4 delivery test** (V-OE4-2, 15 min at 50 Hz). In `pose.conf` set
    `io.raw_input = /tmp/llc_emu`, then:
    ```bash
@@ -125,3 +228,20 @@ Run as root (real-time priorities). Each step only needs the previous ones.
 `/etc/init.d/llcmux` and `/etc/init.d/olympus-pose` start at boot. Then follow the OE5 and
 OE6 tests in DESIGN.md §16 (latency over 15 min with vision running, kill/restart checks,
 IMU unplugged, UMBmark and straight-line runs with `pose_ctl.py MARK` at each start/stop).
+
+**Calibrate the encoder scale first** (DESIGN.md §9.5). The model's per-wheel constants
+(including FR = 2.47 × FL) are not trusted for distance until this is done:
+
+1. Add `--record-dir /var/lib/olympus-pose/cal` to `LLCMUX_ARGS` in `/etc/default/llcmux`
+   and reboot (or restart `llcmux`, then `olympus_hlc`).
+2. In one session: three straight runs of 2 m forward and one spin of one turn CCW in
+   place, with ≥ 3 s at rest before each and between them. Measure each straight run
+   with a tape between the same point of the chassis.
+3. ```bash
+   R=/var/lib/olympus-pose/cal/<run>/llc_record.txt
+   odom_calib.py --list $R                  # numbers the motions: #1, #2, ...
+   odom_calib.py --straight $R#1:2.00 --straight $R#2:2.00 --straight $R#3:2.00 --spin $R#4:1
+   ```
+4. Copy the printed `k_cal_R`, `k_cal_L` (and `chi`) into `sep_geo_params.m`, run
+   `export_pose_conf`, paste section 1 into `pose.conf`, restart `olympus-pose`, and
+   repeat one straight run as the check (error ≤ 2 %).

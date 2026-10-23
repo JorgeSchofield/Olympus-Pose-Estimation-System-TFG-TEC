@@ -31,6 +31,7 @@ add_library(pe_core STATIC
     src/core/stats.c
     src/core/pose_dgram.c
     src/core/line_buf.c
+    src/core/pipeline.c
     ${PE_GEN_SOURCES}
 )
 target_include_directories(pe_core PUBLIC include src/core src/core/gen)
@@ -71,7 +72,8 @@ if(NOT PE_CORE_ONLY)
 
     install(TARGETS olympus-pose llcmux RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(FILES config/pose.conf DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/olympus-pose)
-    install(PROGRAMS tools/pose_listen.py tools/pose_ctl.py tools/llc_emulator.py
+    install(PROGRAMS tools/pose_listen.py tools/pose_ctl.py tools/llc_emulator.py tools/capture_to_replay.py
+            tools/odom_calib.py tools/olympus-pose_gui.py tools/gps_emulator.py
             DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 

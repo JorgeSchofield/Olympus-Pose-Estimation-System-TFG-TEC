@@ -51,7 +51,7 @@ void pe_pose_dgram_encode(const pe_pose_msg_t* m, uint32_t seq, uint64_t t_pub_n
 	put_u32(out + 4, seq);
 	put_u64(out + 8, t_pub_ns);
 	put_u64(out + 16, m->hdr.t_rx_ns);
-	put_u32(out + 24, m->t_llc_ms);
+	put_u32(out + 24, m->llc_tick);   /* LLC tick as sent, whatever est.dt_source is */
 	put_u16(out + 28, m->mode);
 	put_u16(out + 30, m->status);
 	put_f64(out + 32, m->x[0]);
@@ -67,4 +67,25 @@ void pe_pose_dgram_encode(const pe_pose_msg_t* m, uint32_t seq, uint64_t t_pub_n
 	put_f64(out + 112, m->diag[0]);
 	put_u32(out + 120, 0u);
 	put_u32(out + 124, pe_crc32(out, 124u));
+}
+
+void pe_gps_dgram_encode(const pe_gps_msg_t* g, uint32_t seq, uint32_t n_valid,
+                         uint8_t out[PE_GPS_DGRAM_LEN])
+{
+	memset(out, 0, PE_GPS_DGRAM_LEN);
+	memcpy(out, "OGP1", 4);
+	put_u32(out + 4, seq);
+	put_u64(out + 8, g->hdr.t_rx_ns);
+	put_f64(out + 16, g->lat_deg);
+	put_f64(out + 24, g->lon_deg);
+	put_f64(out + 32, g->alt_m);
+	put_f64(out + 40, g->hdop);
+	put_f64(out + 48, g->speed_mps);
+	put_f64(out + 56, g->course_deg);
+	put_u32(out + 64, g->utc_ms_of_day);
+	out[68] = g->fix_quality;
+	out[69] = g->n_sats;
+	out[70] = g->valid;
+	put_u32(out + 72, n_valid);
+	put_u32(out + 76, pe_crc32(out, 76u));
 }
