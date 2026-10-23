@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""GPS emulator: NMEA RMC + GGA for testing the GPS agent and gps_view.py indoors.
+"""GPS emulator: NMEA RMC + GGA for testing the GPS agent and olympus-pose_gui.py indoors.
 
     # NMEA into a pty, read by olympus-pose (io.gps_port = /tmp/gps_emu)
     gps_emulator.py --link /tmp/gps_emu
-    # skip the app: send the datagrams olympus-pose would send, straight to gps_view.py
+    # skip the app: send the datagrams olympus-pose would send, straight to olympus-pose_gui.py
     gps_emulator.py --udp 127.0.0.1:47003
     # a 20 s fix loss after 90 s, faster than real time into a file
     gps_emulator.py --out /tmp/gps.nmea --no-fix 90:110 --duration 300

@@ -3,7 +3,7 @@
  *
  *   - publishes every pose_decimation-th estimate as a UDP datagram (PE-RF-012);
  *   - logs every estimate and every GPS fix with HLC timestamps (PE-RF-013),
- *     and publishes each fix as a UDP datagram for tools/gps_view.py (§11.4);
+ *     and publishes each fix as a UDP datagram for tools/olympus-pose_gui.py (§11.4);
  *   - serves the local control port (MARK, RESET_POSE, SUSPEND, RESUME, STATS);
  *   - once per second writes the validation statistics: per-link delivery and
  *     worst gap (PE-RNF-003), latency p50/p95/max (PE-RNF-002), pose interval

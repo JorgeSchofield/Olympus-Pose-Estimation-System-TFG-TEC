@@ -25,7 +25,8 @@ olympus-pose:  acquisition → fusion → estimation → communication ← GPS (
 | `tools/llc_emulator.py` | RAW: generator (pty or file) for tests without the rover: firmware v3.0 or v2.20 frames, IMU loss, slow LLC clock |
 | `tools/capture_to_replay.py` | Turns a `raw_*.csv` of the LLC repo's `capture_rover_data.py` into a replay file |
 | `tools/pose_listen.py`, `tools/pose_ctl.py` | UDP pose viewer and control-port client |
-| `tools/gps_view.py`, `tools/gps_emulator.py` | GPS web viewer (live, log replay, GPX export) and NMEA emulator (DESIGN.md §11.4) |
+| `tools/olympus-pose_gui.py` | Web GUI: pose, GPS, test markers, controls, logs, figures and GPX (DESIGN.md §11.4) |
+| `tools/gps_emulator.py` | GPS emulator (NMEA into a pty, or datagrams straight to the GUI) |
 | `config/pose.conf` | Configuration: model parameters (from `export_pose_conf.m`) + application settings |
 | `tests/` | Host unit tests and the MATLAB↔C equivalence vectors |
 
@@ -89,10 +90,12 @@ parity tests fail otherwise.
 /etc/init.d/llcmux start          # usually started at boot
 /etc/init.d/olympus-pose start
 olympus-pose -c /etc/olympus-pose/pose.conf --check     # validate a configuration
-pose_listen.py                    # live pose, one line per second
-pose_ctl.py MARK start of run 3   # event marker in the logs
-pose_ctl.py STATS
+olympus-pose_gui.py               # web page: http://<rover-ip>:8080 (see "Web GUI" below)
 ```
+
+Console alternatives: `pose_listen.py` (live pose, one line per second; not at the same
+time as the GUI, both listen on UDP 47001), `pose_ctl.py MARK start of run 3`,
+`pose_ctl.py STATS`.
 
 `olympus_hlc` is started by hand as before; it finds `/dev/arduino_mega` (now the
 `llcmux` pty) and needs no change.
@@ -124,29 +127,40 @@ time). Replay it through the app, without drops and reproducibly:
 olympus-pose -c /etc/olympus-pose/pose.conf -r DIR/<run>/llc_record.txt
 ```
 
-## GPS viewer
+## Web GUI
 
-The GPS is not used by the estimator; this shows that the GPS agent works (OE2,
-DESIGN.md §11.4). `olympus-pose` sends every fix to UDP 47003 (`io.udp_gps_port`). On the
-rover:
-
-```bash
-gps_view.py                      # then open http://<rover-ip>:8080 from a laptop
-```
-
-The page needs no internet. It shows the fix state, satellites, HDOP, fix rate (OE2: ≥ 1
-Hz), the scatter when the rover is still (CEP50 / 2DRMS) and the track in metres, and
-updates every second. For the thesis evidence: keep the rover still for 2 min, then walk
-it around a marked rectangle, and take a screenshot.
+`olympus-pose_gui.py` runs on the rover next to `olympus-pose` and serves one page to any
+laptop on the rover's network, with no internet needed (DESIGN.md §11.4):
 
 ```bash
-gps_view.py --csv /var/lib/olympus-pose/runs/<run>/gps.csv          # replay a logged run
-gps_view.py --csv gps.csv --gpx track.gpx --date 2026-10-21          # for Google Earth
+olympus-pose_gui.py                                      # live: http://<rover-ip>:8080
+olympus-pose_gui.py --run /var/lib/olympus-pose/runs/<run>                 # replay a run
+olympus-pose_gui.py --run /var/lib/olympus-pose/runs/<run> --gpx run.gpx   # GPX, no page
 ```
 
-**Indoors, without the module:** `gps_emulator.py --link /tmp/gps_emu` produces NMEA (set
+| Tab | What it shows / does |
+|---|---|
+| Pose | Estimator state, x, y, θ, distance, pose rate, status flags, the pose track; latency p95 (OE5), worst-link delivery (OE4) and LLC clock scale from the app's `STATS` |
+| GPS | Fix state, satellites, HDOP, fix rate (OE2 ≥ 1 Hz), scatter at rest (CEP50/2DRMS), the track in metres, satellite/HDOP charts, latest fixes |
+| Markers | **Mark** with a label (stop the rover first): stores the 10 s average GPS position and its 2DRMS, the pose at that moment, and writes `MARK <label>` into the run's `events.csv`. Table with the distances between markers. Saved in `/var/lib/olympus-pose/gui_marks.csv` |
+| Controls & files | Reset pose, suspend/resume agents (through the CMAES AMS), run statistics, the logged runs with every file and a GPX per run to download |
+
+Each plot has **SVG** and **PNG** buttons: the figure is saved in the light theme, ready
+for the report and the slides. A GPX holds the track and the markers as named points, for
+Google Earth or any GIS tool.
+
+There is **no password**: anyone on the rover's network can use the controls; reset pose
+and suspend ask for confirmation. The rover is never driven from the GUI. It is a separate,
+normal-priority process: the pose threads (real-time priority) cannot be delayed by it, and
+a refresh costs the same after 5 min or 5 h. To keep it off the rover entirely during the
+OE5 latency tests, just don't start it.
+
+For the thesis evidence: keep the rover still for 2 min (GPS scatter), then mark the start
+and end of each test with a label, and save the figures.
+
+**Indoors, without the GPS module:** `gps_emulator.py --link /tmp/gps_emu` produces NMEA (set
 `io.gps_port = /tmp/gps_emu` and restart `olympus-pose`) to test the whole chain;
-`gps_emulator.py --udp 127.0.0.1:47003 --speedup 10` feeds the viewer alone, also on a PC.
+`gps_emulator.py --udp 127.0.0.1:47003 --speedup 10` feeds the GPS tab alone.
 
 ## LLC firmware versions
 

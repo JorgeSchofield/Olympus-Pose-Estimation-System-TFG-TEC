@@ -290,7 +290,7 @@ static void test_misc(void)
 
 	CHECK(pe_crc32((const uint8_t*)"123456789", 9) == 0xCBF43926u, "CRC-32 check value");
 
-	/* GPS datagram (pose_dgram.h): layout and CRC as tools/gps_view.py decodes it */
+	/* GPS datagram (pose_dgram.h): layout and CRC as tools/olympus-pose_gui.py decodes it */
 	{
 		pe_gps_msg_t g;
 		uint8_t d[PE_GPS_DGRAM_LEN];

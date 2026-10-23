@@ -4,7 +4,8 @@
     pose_listen.py [--port 47001] [--all]
 
 By default prints one summary line per second; --all prints every datagram.
-Checks the magic and the CRC-32 of each datagram.
+Checks the magic and the CRC-32 of each datagram. olympus-pose_gui.py listens on the same
+port, so run one or the other.
 """
 import argparse
 import math

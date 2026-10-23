@@ -21,7 +21,7 @@
  *   124  u32      CRC-32 (IEEE) of bytes 0..123
  *
  * GPS datagram, version 1 (DESIGN.md §11.4): one per fix epoch, sent to its own
- * port (io.udp_gps_port). 80 bytes, same conventions. Decoder: tools/gps_view.py.
+ * port (io.udp_gps_port). 80 bytes, same conventions. Decoder: tools/olympus-pose_gui.py.
  *
  *   off  type     field
  *     0  char[4]  magic "OGP1"

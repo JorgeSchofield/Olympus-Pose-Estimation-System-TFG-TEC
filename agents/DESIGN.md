@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document | ARQ-PE-003 — Agent architecture and LLC→HLC data path (draft) |
-| Version | v0.12 — 2026-10-21 (week 12). v0.12: the simulation model and the application now run the same estimation chain (§9.6): event-driven estimator by default in the model, v3.0 frame and `imu_ok` in the simulated LLC, one parser rule set, shared fusion inputs (`est.dt_source`, `est.gyro_yaw_axis` exported by the model); replay- and parser-parity tests V-U-9/V-U-10. v0.11: GPS fixes published as UDP datagrams; GPS web viewer, log replay and GPX export; GPS emulator (§11.4). v0.10 (2026-10-19): first tests on the rover image. `llcmux` pty A now writes whole lines with a leading `\n` (fix for `rover_bridge.recv_tlm()` losing TLM on a quiet link, §6.1); reference frames stated (§11.0); FR wheel counts 2.47 × FL, in the model and `pose.conf`; per-side calibration factors and `odom_calib.py` (§9.5); accelerometer vertical follows `est.gyro_yaw_axis`. v0.9: LLC firmware v3.0 (MPU-9250 driver, `RAW:` frame with `temp` and `imu_ok`, always emitted) supported next to v2.20 (§3.1.1); `est.dt_source` implemented after measuring the LLC clock scale k ≈ 1.87 on the v3.0 captures (§10.4); capture→replay converter, emulator v3/IMU-loss/slow-clock modes. v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
+| Version | v0.13 — 2026-10-22 (week 12). v0.13: web GUI `olympus-pose_gui.py` (pose, GPS, test markers, controls, logs, figures, GPX, replay) replaces the GPS viewer (§11.4). v0.12 (2026-10-21): the simulation model and the application now run the same estimation chain (§9.6): event-driven estimator by default in the model, v3.0 frame and `imu_ok` in the simulated LLC, one parser rule set, shared fusion inputs (`est.dt_source`, `est.gyro_yaw_axis` exported by the model); replay- and parser-parity tests V-U-9/V-U-10. v0.11: GPS fixes published as UDP datagrams; GPS web viewer, log replay and GPX export; GPS emulator (§11.4). v0.10 (2026-10-19): first tests on the rover image. `llcmux` pty A now writes whole lines with a leading `\n` (fix for `rover_bridge.recv_tlm()` losing TLM on a quiet link, §6.1); reference frames stated (§11.0); FR wheel counts 2.47 × FL, in the model and `pose.conf`; per-side calibration factors and `odom_calib.py` (§9.5); accelerometer vertical follows `est.gyro_yaw_axis`. v0.9: LLC firmware v3.0 (MPU-9250 driver, `RAW:` frame with `temp` and `imu_ok`, always emitted) supported next to v2.20 (§3.1.1); `est.dt_source` implemented after measuring the LLC clock scale k ≈ 1.87 on the v3.0 captures (§10.4); capture→replay converter, emulator v3/IMU-loss/slow-clock modes. v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
 | Covers | Deliverable "Documento de arquitectura multiagente y protocolo serial LLC-HLC" (OE2, OE4; milestone H2) and the design basis for the OE4/OE5/OE6 validation |
 | Sources | Thesis report *Olympus_pose_TFG.pdf* (ch. 1, 2.1.4–2.1.8, 3.1–3.4, 4); `requirements/DRT-SEP-001.md` v0.2; `requirements/ICD-PE-002.md` v1.0; LLC firmware v2.20 (`Alonso11/rover-low-level-controller`, `src/main.rs`); HLC image (`Alonso11/olympus-hlc-rpi5`, `olympus_hlc` v3.x, `rover_bridge`); CMAES pthreads port (`CMAES/libCMAES_pthreads`); simulation model v2.0 (`JorgeSchofield/olympus-pose-estimation-simulation`, folder `Simulation Model v2.0`) |
 | Status | Implemented (§19); first tests on the rover image 2026-10-19. Section 17 lists the changes this design implies for the thesis report |
@@ -939,7 +939,7 @@ frames the app rejected). Both share `t_rx_ns`, so they join exactly.
 `MARK <text>`, `RESET_POSE [x y θ]`, `SUSPEND <agent>`, `RESUME <agent>`, `STATS`
 (replies with the latest stats line).
 
-### 11.4 GPS datagram and viewer (added 2026-10-21)
+### 11.4 GPS datagram and web GUI (added 2026-10-21, GUI 2026-10-22)
 
 The GPS never enters the estimator (thesis §1.6), but OE2 asks to show that it works.
 Besides `gps.csv`, the communication agent publishes every fix epoch as an 80-byte
@@ -958,33 +958,51 @@ host(s) as the pose datagram. The pose port and its decoders are unchanged.
 | 72 | u32 | valid fixes so far |
 | 76 | u32 | CRC-32 (IEEE) of bytes 0..75 |
 
-**`tools/gps_view.py`** runs on the rover, receives these datagrams and serves a web page
-(default port 8080) that any laptop on the rover's network can open; it needs no internet,
-since the track is drawn in local east/north metres from the first valid fix.
+**`tools/olympus-pose_gui.py`** (2026-10-22; it replaces the first GPS-only viewer) runs
+on the rover next to `olympus-pose` and serves one web page (default port 8080) to any
+laptop on the rover's network. It needs no internet: plots are drawn in local metres. It
+listens to the pose datagrams (§11.1, so `pose_listen.py` and the GUI are alternatives on
+the same port), the GPS datagrams above, and talks to the control port (§11.3).
 
-The page shows:
-- the fix state (fix / no fix / no data, with icon and label);
-- satellites, HDOP, the fix rate (the OE2 indicator, ≥ 1 Hz) and the valid fixes;
-- the scatter of the last 2 min, as CEP50 and 2DRMS: the receiver's precision when the
-  rover is still;
-- the track, broken where the fix was lost;
-- 10-minute charts of satellites and HDOP, and a table of the latest fixes.
+| Tab | Content |
+|---|---|
+| Pose | Estimator state (waiting / initializing / running / stale), x, y, θ, distance, pose rate, status flags, the pose track in the pose frame (§11.0); from `STATS`: latency p95 (OE5), worst-link delivery and gap (OE4), LLC clock scale (§10.4) |
+| GPS | Fix state, satellites, HDOP, fix rate (OE2, ≥ 1 Hz), scatter of the last 2 min as CEP50/2DRMS (the receiver's precision with the rover still), the track broken at fix losses, 10-min satellite and HDOP charts, latest fixes |
+| Markers | Test points for the report: **Mark** stores the mean of the last 10 s of valid fixes and their 2DRMS, the pose at that moment, and sends `MARK <label>` so the run's `events.csv` has the same label at the same HLC time. Distances between consecutive markers, GPS and pose. Saved in `gui_marks.csv` next to the run folders |
+| Controls & files | `RESET_POSE`, `SUSPEND`/`RESUME` of the agents through the CMAES AMS (agent states from `STATS`), the run statistics, the logged runs with every file and a GPX per run to download |
 
-**Load on the HLC.** In `olympus-pose` the datagram costs one encode and one non-blocking
-send per fix (1 Hz), negligible; `io.udp_gps_port = 0` removes it. The viewer is a
-separate, normal-priority process, so it cannot delay the `SCHED_FIFO` pose threads, and it
-only runs while someone needs the page. It computes the track once per fix, and the page
-asks for just the points it does not have yet (`/state?epoch=&since=`). A refresh then costs
-about 1.5 ms and 12 KB (measured on a PC) whatever the run length; the first version
-resent the whole track and reached 89 ms and 811 KB per second after 5.6 h. To keep even
-that off the rover, run the viewer on the laptop: set `io.udp_pose_host2` to the laptop's
-address, and the GPS datagrams go there too.
+Every plot exports to **SVG** (vector, for the report) and **PNG** (slides), always in the
+light theme. The GPX holds the GPS track and the markers as named waypoints. `--run DIR`
+replays a logged run on the same page; its markers are rebuilt from the run's `MARK`
+events with the same rule (10 s GPS mean, pose at that time), and `--gpx` writes the GPX
+without starting the page.
 
-The same page replays a logged run (`--csv gps.csv`), and `--gpx` exports a run for Google
-Earth or any GIS tool. **`tools/gps_emulator.py`** produces NMEA into a pty (for the GPS
-agent) or the datagrams directly (for the viewer alone), so the chain can be shown
-indoors. Its sentences were checked against the app's own NMEA parser (300 epochs,
-0 rejected).
+GPS markers show **where** each test was done and that the GPS is consistent. With a
+2-5 m scatter they do not measure test distances of 2-5 m; the tape stays the reference
+for OE6. The 10 s mean removes the fast noise but not the slow drift, so the page shows
+the 2DRMS of the averaged fixes, not a smaller "error of the mean".
+
+**Access and safety.** No password (decided 2026-10-22): anyone on the rover's network can
+use the controls; reset pose, suspend and marker deletion ask for confirmation. Only
+`RESET_POSE`, `SUSPEND`, `RESUME`, `STATS` and `MARK` can be sent; the rover is never
+driven from the GUI, and no service is started or stopped.
+
+**Load on the HLC.** In `olympus-pose` the GPS datagram costs one encode and one
+non-blocking send per fix (1 Hz), negligible; `io.udp_gps_port = 0` removes it. The GUI is
+a separate, normal-priority process, so it cannot delay the `SCHED_FIFO` pose threads, and
+it only runs while someone needs it. Tracks are built once per datagram (the pose track
+keeps a point every 1 cm of motion) and the page asks only for the points it does not
+have (`/api/state?pe=&ps=&ge=&gs=`). A GPS refresh costs about 1.5 ms and 12 KB (measured
+on a PC) whatever the run length; the first GPS viewer resent the whole track and reached
+89 ms and 811 KB per second after 5.6 h. Decoding 25-50 pose datagrams per second is
+well under 1 % of a core. For the OE5 latency runs the GUI is simply not started.
+
+**`tools/gps_emulator.py`** produces NMEA into a pty (for the GPS agent) or the datagrams
+directly (for the GUI alone), so the chain can be shown indoors. Its sentences were
+checked against the app's own NMEA parser (300 epochs, 0 rejected). The GUI was tested
+against a stand-in that sends the app's datagrams, answers the control port like
+`agent_comm.c` and writes a run folder in the app's formats (live, markers, controls,
+downloads, GPX, figure export, replay).
 
 ---
 
@@ -1221,7 +1239,7 @@ Y1–Y3, Y5 and Y10 are done (2026-10-05). Y4, Y6–Y9 are hygiene and remain op
 | V-OE4-1 | OE4 / PE-RF-006 | D | Start the app; trace registrations and messages | 5 agents registered; every link active |
 | V-OE4-2 | OE4 / PE-RNF-003 | T | 15 min at 50 Hz (emulator) = 45 000 frames, with vision running (or `stress-ng` on cores 0–2) | Each link ≥ 99 % delivery, ≤ 4 consecutive losses |
 | V-OE2-1 | OE2 | T | 10 min on the rover, `llcmux` statistics/record | `RAW:` inter-arrival p99 ≤ 20 ms on the HLC clock; clock scale k reported (§10.4) |
-| V-OE2-2 | OE2 / PE-RF-013 | T | ≥ 300 s outdoors, `gps_view.py` open (§11.4): 2 min still, then a walk around a marked rectangle | Valid fixes at ≥ 1 Hz; scatter at rest (CEP50/2DRMS) and the track's shape recorded as evidence (screenshot + `gps.csv` + GPX) |
+| V-OE2-2 | OE2 / PE-RF-013 | T | ≥ 300 s outdoors, `olympus-pose_gui.py` open (§11.4): 2 min still, then a walk around a marked rectangle | Valid fixes at ≥ 1 Hz; scatter at rest (CEP50/2DRMS) and the track's shape recorded as evidence (screenshot + `gps.csv` + GPX) |
 | V-OE5-1 | OE5 / PE-RNF-002 | T | 15 min on the rover with `olympus_hlc` + vision running | p95 (and max reported) of the end-to-end latency < 100 ms; optional oscilloscope method |
 | V-OE5-2 | PE-RNF-001 | T | Same run | Pose interval p95 ≤ 100 ms |
 | V-OE5-3 | OE5 / PE-RNF-005 | T | Same run, extended to 60 min for margin | No agent restart or failure; RSS stable; no growing drop counters |
@@ -1538,7 +1556,7 @@ alternatives raised during the design, including the adviser's, are on record:
 | LLC firmware v3.0 support | Acquisition (9 or 11 fields), `imu_bad_frames`, `imu_temp_c`, `frame_version` in `pose.csv`; `est.dt_source` | Both 2026-10-06 captures parse completely; replayed in the model: 0 rejects; emulated IMU loss (10 s) handled as `IMU_INVALID` without gaps | Live run with the rover and `dt_source = 1` |
 | `llcmux` | `agents/tools/llcmux` | Run on the rover image with `olympus_hlc` (2026-10-19): RAW filtering works; TLM loss on a quiet link found and fixed by whole-line framing (§6.1); fix cross-compiled with `-Werror` | DTR reset on open, reconnect (V-OE5-4/5) |
 | Emulator and tools | `agents/tools`: `llc_emulator.py` (v3.0/v2.20 frames, `--imu-off`, `--tick-ms`), `capture_to_replay.py` | Emulated UMBmark replayed in MATLAB: distance exact (8.000 m), square closes to 1.65 %; slow-clock run reproduces the k ≈ 1.87 error and its `dt_source = 1` fix (§10.4) | Live pty mode on the RPi |
-| GPS viewer | GPS datagram (`io.udp_gps_port`), `tools/gps_view.py`, `tools/gps_emulator.py` (§11.4) | Datagram layout unit test; emulator NMEA accepted by the app's parser (300 epochs, 0 rejected); live page, replay of a `gps.csv` and GPX export checked with the emulator | Outdoor run with the real module (V-OE2-2) |
+| Web GUI | GPS datagram (`io.udp_gps_port`), `tools/olympus-pose_gui.py`, `tools/gps_emulator.py` (§11.4) | Datagram layout unit test; emulator NMEA accepted by the app's parser (300 epochs, 0 rejected); GUI tested against a stand-in of the app (datagrams, control port, run folder): live pose and GPS, markers with MARK in events.csv, reset/suspend/resume, file downloads, run and session GPX, SVG/PNG export, replay | On the Pi with the real app and GPS module (V-OE2-2) |
 | Yocto | `meta-olympus-pose/recipes-pose/olympus-pose`, udev bbappend, image bbappend | Image built and booted with `llcmux` and `olympus-pose` (2026-10-19). That image fetched SRCREV `aadf014` (the v3.0 support was not yet on `main`), so its parser accepted only 9-field frames | Rebuild after merging `master` into `main` |
 
 Implementation choices not in the earlier sections:
