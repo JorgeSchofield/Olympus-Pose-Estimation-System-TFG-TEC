@@ -35,10 +35,17 @@ linux_demo/
   sender_receiver/           two-agent mailbox smoke test
   rock_paper_scissors/       three-agent test: broadcast, suspend/resume via
                              the AMS, get_state, OneShotBehaviour
-docs/README.md        findings from reading the original code + every
+  rps_stress/                the OE3 indicator test (50 Hz, 45 000 messages)
+docs/README.md               findings from reading the original code + every
                              design decision made while porting it
+CMAES_Yocto_layer/meta-olympus-pose/
+                             Yocto layer: this library, its demos, and the pose
+                             application (../agents) with llcmux
 CMakeLists.txt               top-level build (libCMAES_pthreads + linux_demo)
 ```
+
+The pose estimation application built on this library is in
+[`../agents`](../agents/README.md); it links the library from the same commit.
 
 The original FreeRTOS and libcsp backends are not vendored here; see the
 [upstream repository](https://github.com/AndresConejoBoza/CMAES) for them.
@@ -106,39 +113,43 @@ than built natively on the board.
 
 ### The layer
 
-Integration is done with a separate Yocto layer, `meta-olympus-pose`, which
-adds **no source code** — it tells BitBake where this repository lives and
-how to build it:
+Integration is done with the Yocto layer `meta-olympus-pose`, which lives in
+this repository at `CMAES/CMAES_Yocto_layer/meta-olympus-pose`. It adds **no
+source code**: it tells BitBake where this repository lives and how to build
+it, and it also builds the pose application and `llcmux`:
 
 ```
 meta-olympus-pose/
-  conf/layer.conf                           collection olympus-pose, scarthgap
-  recipes-cmaes/cmaes/cmaes_0.1.0.bb        fetches this repo at a pinned SRCREV
-  recipes-cmaes/cmaes/files/*.service       systemd units for the demos
-  recipes-core/images/olympus-image.bbappend adds cmaes-demos to the rover image
+  conf/layer.conf                                  collection olympus-pose, scarthgap
+  recipes-cmaes/cmaes/cmaes_0.1.0.bb               this library and its demos, pinned SRCREV
+  recipes-cmaes/cmaes/files/*.service              systemd units for the demos (inert on sysvinit)
+  recipes-pose/olympus-pose/olympus-pose_0.1.0.bb  the pose application and llcmux
+  recipes-core/custom-udev-rules/                  real Arduino port -> /dev/arduino_mega_hw
+  recipes-core/images/olympus-image.bbappend       adds the packages to the rover image
 ```
 
 The layer directory is named `meta-olympus-pose`, not `meta-olympus`: the
 rover's own layer already occupies that directory name and registers the
 BitBake collection `meta-olympus`.
 
-The recipe pins `SRCREV` to a specific commit of this repository. Bump it
-whenever the port changes, or BitBake will keep building the old revision
-from its cache.
+Both recipes pin `SRCREV` to a commit of this repository on branch `main`.
+Bump it whenever the code changes, or BitBake keeps building the old
+revision from its cache.
 
 ### Build
 
 ```bash
 cd olympus-hlc-rpi5
-git clone <meta-olympus-pose remote> layers/meta-olympus-pose
+git clone https://github.com/JorgeSchofield/Olympus-Pose-Estimation-System-TFG-TEC.git layers/olympus-pose-repo
 source layers/poky/oe-init-build-env build
-bitbake-layers add-layer ../layers/meta-olympus-pose
+bitbake-layers add-layer ../layers/olympus-pose-repo/CMAES/CMAES_Yocto_layer/meta-olympus-pose
 
-bitbake cmaes          # the recipe alone — minutes, catches most problems
+bitbake cmaes          # the recipe alone: minutes, catches most problems
 bitbake olympus-image  # incremental, on the existing sstate cache
 ```
 
-Nothing in `local.conf` needs to change.
+Nothing in `local.conf` needs to change. Details and caveats are in the
+layer's [README](CMAES_Yocto_layer/meta-olympus-pose/README.md).
 
 ### Packages produced
 
@@ -150,7 +161,7 @@ at runtime — the archive is linked into whatever binary uses it.
 | `cmaes` | empty | — |
 | `cmaes-staticdev` | `libcmaes_pthreads.a` | no (build sysroot only) |
 | `cmaes-dev` | `CMAES.h` | no (build sysroot only) |
-| `cmaes-demos` | both demo binaries | yes, via the bbappend |
+| `cmaes-demos` | the three demo binaries (`sender_receiver`, `rock_paper_scissors`, `rps_stress`) | yes, via the bbappend |
 
 Verify after a build with:
 
@@ -211,16 +222,20 @@ calls `boot` and waits, and `policy=1` (`SCHED_FIFO`) with a non-zero
 `rtprio` on every agent and AMS thread. The fallback warning
 (`docs/README.md` §3) was not emitted.
 
-### Not yet characterised
+### OE3 indicator: passed (2026-10-07)
 
-Functional correctness is established; timing is not. The demos run at 1 Hz
-with no load and no instrumentation, so they say nothing about the
-quantitative targets of the Pose Estimation subsystem. Still to measure:
-period jitter of a cyclic behaviour at 50 Hz, message delivery rate with
-depth-1 mailboxes under load, end-to-end latency across the agent chain, and
-memory/thread stability over a long run.
+`cmaes_rps_stress_demo 45000 20 3`, as root on a Raspberry Pi 5 with the
+Olympus image, pinned to CPU 3: 45 000 messages in 450.0 s (100 msg/s),
+22 499 rounds with 44 998 AMS suspends and resumes each; 0 sequence gaps,
+0 duplicates, 0 bad checksums, 0 send failures, 0 AMS errors, 0 suspend or
+receive timeouts; RSS 1712 kB at baseline and at the end (growth 0 kB).
+`RESULT : PASS`, milestone H3 closed (`agents/DESIGN.md` §14).
 
-Two defects found while planning those measurements are now fixed (see
+Delivery and latency of the pose application's own agent chain over 15
+minutes are the OE4 and OE5 indicators, measured with the application's
+`stats.csv` (see `agents/README.md`).
+
+Two defects found while planning these measurements are fixed (see
 `docs/README.md` §3, "Real-time helpers"):
 
 - `agent_waitFunction` uses a **relative** `nanosleep`, so a periodic
@@ -234,12 +249,12 @@ Two defects found while planning those measurements are now fixed (see
 - **GCC 14 / Clang 20 ready.** The `void`/`void*` vtable mismatches, the
   `NULL`-to-`pthread_t` assignment and the implicit function declaration
   inherited from the original library are fixed; the library builds as
-  strict C99 with no warnings under Clang 20 (`docs/README.md` §4). The
-  recipe's last `-Wno-error` flag can go once `SRCREV` includes this.
-- **Init system: probably sysvinit** (repository configuration), to be
-  confirmed on the board with `ps -p 1 -o comm=`. On sysvinit the
-  `.service` files the layer ships are installed but inert; run the demos
-  from the shell.
+  strict C99 with no warnings under Clang 20 (`docs/README.md` §4); the
+  recipe builds it without any `-Wno-error` flag.
+- **Init system: sysvinit** (confirmed on the board, 2026-10-07). The
+  `.service` files the layer ships for the demos are installed but inert;
+  run the demos from the shell. The pose application and `llcmux` ship
+  sysvinit scripts.
 - **The Raspberry Pi kernel is not `PREEMPT_RT`.** `SCHED_FIFO` gives
   priority ordering, not a bounded worst case.
 
@@ -252,8 +267,10 @@ Two defects found while planning those measurements are now fixed (see
 - [x] Cross-compiled with Yocto (scarthgap) for `raspberrypi5`
 - [x] Verified running on a Raspberry Pi 5 with the Olympus rover image,
       with `SCHED_FIFO` active
-- [ ] Timing characterised against the subsystem's quantitative targets
-- [ ] Pose Estimation agent system built on top
+- [x] OE3 indicator: 45 000 messages at 50 Hz with AMS suspend/resume, no
+      failures, no memory growth (2026-10-07)
+- [x] Pose Estimation agent application built on top (`../agents`, five
+      agents, in the rover image through `meta-olympus-pose`)
 
 ## Credits
 

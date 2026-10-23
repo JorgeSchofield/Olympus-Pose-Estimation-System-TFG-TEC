@@ -245,3 +245,39 @@ IMU unplugged, UMBmark and straight-line runs with `pose_ctl.py MARK` at each st
 4. Copy the printed `k_cal_R`, `k_cal_L` (and `chi`) into `sep_geo_params.m`, run
    `export_pose_conf`, paste section 1 into `pose.conf`, restart `olympus-pose`, and
    repeat one straight run as the check (error ≤ 2 %).
+
+### Final test session: one run for every pending indicator
+
+What is still open is OE2 (rate), OE4 (15-min delivery), OE5 (15-min latency) and OE6
+(accuracy against markers and against the model). Done in this order, one continuous
+session records all of them (test IDs from DESIGN.md §16):
+
+**Before.** Image built from `main` with the latest `SRCREV`. IMU fixed in its final place,
+and `gyro_yaw_axis` / the sign of `gyro_scale` matching it. `dt_source = 1` while the LLC
+loop is software-timed. Both are set in `sim_params.m`, then re-exported. `llcmux` recording
+on (step 1 above). Floor markers: a 5 m line and a 2 m square, with a tape point on the
+chassis. The GUI (`http://<rover>:8080`) open.
+
+1. **Calibration** (V-CAL-1, V-CAL-2): steps 1–4 above, then restart `olympus-pose`.
+2. **Start the timed session** with `olympus_hlc` and vision running, as on a real mission
+   (latency under load). Keep `olympus-pose` running for **≥ 15 min** from here on. Rest
+   ≥ 3 s before every motion, and press **Mark** in the GUI at every start and stop.
+3. **5 m straight line** ×3 (V-OE6-1): measure the end point against the markers;
+   ≤ 15 cm.
+4. **360° spin in place** ×3 (V-OE6-2): final heading error ≤ 10.8°.
+5. **UMBmark 2 m**, clockwise and counter-clockwise; ideally 5 each, as in Borenstein's
+   method (V-OE6-3, general objective). Final position ≤ 24 cm; pose ≥ 10 Hz.
+6. **Stop** after ≥ 15 min. Keep the run folder and the `llcmux` recording.
+
+**Reading the results:**
+
+| Indicator | Where |
+|---|---|
+| OE2, LLC rate ≥ 50 Hz (V-OE2-1) | `llcmux` stats line (`RAW interval … (… Hz)`) and `llc_clock_scale` in `stats.csv`. With the current firmware this reads ≈ 26.7 Hz and fails; it needs the timer-driven LLC loop |
+| OE4, delivery ≥ 99 %, ≤ 4 consecutive (V-OE4-2) | last line of `stats.csv`: `*_delivered`, `*_lost`, `*_max_gap` per link |
+| OE5, latency < 100 ms for 15 min (V-OE5-1…3) | `stats.csv`: `lat_p95_ms`, `lat_max_ms`, `interval_p95_ms`, `rss_kb` over the whole run; `events.csv` without restarts |
+| OE6 against markers (V-OE6-1…3) | `pose.csv` at each Mark (the GUI's Markers tab and `gui_marks.csv`) against the tape measurements |
+| OE6 against the model (V-OE6-4) | MATLAB: `R = hlc_replay('<run>/llc_record.txt')` gives the same poses as `pose.csv`; then run the model's simulated scenario for the same path and compare |
+
+Fault tests (V-OE5-5 kill/restart, V-OE5-6 IMU unplugged) go **after** the timed session,
+because they would break its 15 minutes. The GPS test (V-OE2-2) is outdoors, on its own.

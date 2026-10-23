@@ -1,6 +1,7 @@
 # meta-olympus-pose
 
-Yocto layer adding the **CMAES pthreads backend** to the Olympus rover's
+Yocto layer adding the **CMAES pthreads library** and the **pose estimation
+application** (`olympus-pose`, `llcmux`, web GUI and tools) to the Olympus rover's
 existing HLC image (TFG, Electronic Engineering, TEC — SETEC Lab, ELANaV).
 
 Targets **Yocto scarthgap (5.0 LTS)**, matching the rover's current build
@@ -46,10 +47,12 @@ bitbake cmaes            # recipe alone first
 bitbake olympus-image
 ```
 
-The clone only provides the layer metadata. The `cmaes` recipe fetches the
-sources itself from GitHub at the pinned `SRCREV` on branch `main`, so a
-library change reaches the image only after it is merged into `main` and
-`SRCREV` is bumped to that commit.
+The clone only provides the layer metadata. The `cmaes` and `olympus-pose`
+recipes fetch the sources themselves from GitHub at their pinned `SRCREV` on
+branch `main`, so a change reaches the image only after it is merged into
+`main` and `SRCREV` is bumped to that commit. Rebuild with
+`bitbake olympus-pose olympus-image` (or `bitbake -c cleansstate olympus-pose`
+first if BitBake does not pick up a new `SRCREV`).
 
 Nothing in `local.conf` needs to change. `enable_uart=1` and
 `dtparam=i2c_arm=1` are already in `RPI_EXTRA_CONFIG`.
@@ -62,7 +65,7 @@ Nothing in `local.conf` needs to change. `enable_uart=1` and
 | `cmaes-staticdev` | `libcmaes_pthreads.a` |
 | `cmaes-dev` | `${includedir}/cmaes/CMAES.h` |
 | `cmaes-demos` | the three demo binaries (`sender_receiver`, `rock_paper_scissors`, `rps_stress`), plus units if the image uses systemd |
-| `olympus-pose` | `/usr/bin/olympus-pose`, `/etc/olympus-pose/pose.conf`, the Python tools, `/etc/init.d/olympus-pose` (S91) |
+| `olympus-pose` | `/usr/bin/olympus-pose`, `/etc/olympus-pose/pose.conf`, the Python tools (web GUI `olympus-pose_gui.py` on port 8080, `pose_listen.py`, `pose_ctl.py`, `odom_calib.py`, emulators, converters), `/etc/init.d/olympus-pose` (S91) |
 | `olympus-pose-llcmux` | `/usr/bin/llcmux`, `/etc/default/llcmux`, `/etc/init.d/llcmux` (S90) |
 
 ## Caveats
