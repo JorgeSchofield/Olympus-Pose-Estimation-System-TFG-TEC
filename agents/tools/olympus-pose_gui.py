@@ -88,8 +88,10 @@ def load_conf(path):
             return int(vals.get(k, d))
         except ValueError:
             return d
+    # io.pose_frame: axes of the published pose (DESIGN.md §11.0). The app writes
+    # x, y in this frame; the page only needs it to draw the heading and labels.
     return {'pose_port': num('io.udp_pose_port', 47001), 'gps_port': num('io.udp_gps_port', 47003),
-            'ctrl_port': num('io.udp_ctrl_port', 47002),
+            'ctrl_port': num('io.udp_ctrl_port', 47002), 'pose_frame': num('io.pose_frame', 0),
             'log_dir': vals.get('io.log_dir') or '/var/lib/olympus-pose/runs'}
 
 
@@ -424,7 +426,8 @@ class App:
                     'stats_age_s': (time.monotonic() - self.stats_t) if self.live and self.stats_t else None,
                     'pose': self.pose.snapshot(now, qi('pe'), qi('ps')),
                     'gps': self.gps.snapshot(now, qi('ge'), qi('gs')),
-                    'marks': marks, 'log_dir': self.conf['log_dir'], 'marks_file': self.marks.path}
+                    'marks': marks, 'log_dir': self.conf['log_dir'], 'marks_file': self.marks.path,
+                    'pose_frame': self.conf['pose_frame']}
 
     def mark(self, label):
         label = ' '.join(label.split())[:60] or 'mark'
@@ -740,6 +743,9 @@ def main():
             print('olympus-pose_gui: %s -> %s' % (run, a.gpx))
             return
         conf['log_dir'] = a.log_dir or os.path.dirname(run)
+        # the run's own frame, from the parameter dump in its header.txt
+        hdr = load_conf(os.path.join(run, 'header.txt'))
+        conf['pose_frame'] = hdr['pose_frame']
         app = App(conf, False, os.path.basename(run), None)
         n_pose, n_gps = load_run(app, run)
         print('olympus-pose_gui: replay of %s: %d poses, %d GPS fixes, %d marks'
@@ -893,7 +899,7 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13px
   <div class="chips" id="p-flags"></div>
   <div class="card" id="c-ptrk">
     <h2>Pose track</h2>
-    <p class="sub">Metres in the pose frame: x = where the rover faced at start, y = its left. ○ start, ● now with heading; markers in orange.</p>
+    <p class="sub" id="ptrk-sub">Metres in the pose frame. ○ start, ● now with heading; markers in orange.</p>
     <div class="acts"><button class="small" data-fig="ptrk">SVG</button><button class="small" data-fig="ptrk" data-png="1">PNG</button></div>
     <svg id="ptrk" viewBox="0 0 900 600" role="img" aria-label="Pose track in metres"></svg>
     <div class="tip" id="tip-ptrk"></div>
@@ -1138,6 +1144,9 @@ function renderPose(s) {
     $('p-lat-s').textContent = $('p-del-s').textContent = s.live ? 'no STATS reply' : 'no stats.csv';
   }
   // track
+  $('ptrk-sub').textContent = 'Metres in the pose frame: ' + (s.pose_frame === 1
+    ? 'y = where the rover faced at start, x = its right'
+    : 'x = where the rover faced at start, y = its left') + '. ○ start, ● now with heading; markers in orange.';
   const svg = $('ptrk'); svg.replaceChildren();
   const W = 900, H = 600, pts = PT.track;
   const pins = s.marks.filter(m => m.x != null).map(m => ({a: m.x, b: m.y, id: m.id, label: m.label}));
@@ -1153,7 +1162,10 @@ function renderPose(s) {
   drawPins(svg, pins, P);
   if (L) {
     const cx = P.X(L.x), cy = P.Y(L.y);
-    el('line', {x1: cx, y1: cy, x2: cx + 22 * Math.cos(L.theta), y2: cy - 22 * Math.sin(L.theta), class: 'head'}, svg);
+    // heading is relative to the start direction (CCW): along +x in frame 0, along +y in frame 1
+    const hx = s.pose_frame === 1 ? -Math.sin(L.theta) : Math.cos(L.theta);
+    const hy = s.pose_frame === 1 ? Math.cos(L.theta) : Math.sin(L.theta);
+    el('line', {x1: cx, y1: cy, x2: cx + 22 * hx, y2: cy - 22 * hy, class: 'head'}, svg);
     el('circle', {cx, cy, r: 6, class: 'cur'}, svg);
   }
   PTRK = {pts, X: P.X, Y: P.Y, hov: el('circle', {r: 7, class: 'hov', visibility: 'hidden'}, svg)};

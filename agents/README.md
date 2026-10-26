@@ -100,9 +100,12 @@ time as the GUI, both listen on UDP 47001), `pose_ctl.py MARK start of run 3`,
 `olympus_hlc` is started by hand as before; it finds `/dev/arduino_mega` (now the
 `llcmux` pty) and needs no change.
 
-**Pose axes** (thesis §2.1, DESIGN.md §11.0): the origin and axes are the rover's pose when
-the estimator starts. **x = where the front pointed, y = to its left**, θ counter-clockwise.
-Driving straight ahead increases **x**; that is correct, not swapped axes.
+**Pose axes** (DESIGN.md §11.0): the origin is the rover's position when the estimator
+starts. With the shipped `io.pose_frame = 1`, **y = where the front pointed, x = to its
+right**. θ is the heading relative to that start direction, counter-clockwise positive, so
+a drift to the left gives a negative x and a positive θ. `io.pose_frame = 0` publishes
+the thesis/estimator frame instead (x forward, y left). It only changes what is published
+(datagram, `pose.csv`, GUI, `RESET_POSE`), never the estimate.
 
 **IMU mounting**: only the vertical axis matters. Set `gyro_yaw_axis` in the model's
 `sim_params.m` to the IMU axis that points up (0 x, 1 y, 2 z) and re-export; it reaches

@@ -40,6 +40,10 @@ typedef struct {
 	int    udp_ctrl_port;            /* 0 disables the control port */
 	int    udp_gps_port;             /* GPS datagrams to udp_pose_host(2) on this port; 0 = off */
 	int    pose_decimation;          /* send every Nth estimate (1 = all) */
+	int    pose_frame;               /* axes of the PUBLISHED pose (datagram, pose.csv, RESET_POSE):
+	                                    0 = estimator frame, x forward at start, y left (thesis §2.1);
+	                                    1 = x right, y forward at start. The estimator itself always
+	                                    works in frame 0 (DESIGN.md §11.0) */
 	char   log_dir[PE_PATH_MAX];     /* a run sub-folder is created inside */
 
 	/* estimation agent (application side) */

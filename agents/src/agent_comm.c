@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "pipeline.h"
 #include "pose_dgram.h"
 #include "port.h"
 #include "stats.h"
@@ -38,16 +39,27 @@ static unsigned        ctrl_next;
 static uint32_t        ctrl_seq;
 static double          last_llc_reset_t_cum = -1.0;
 
-static void handle_pose(const pe_pose_msg_t* p)
+static void handle_pose(const pe_pose_msg_t* est)
 {
 	uint64_t now = pe_now_ns();
-	double lat_ms = (double)(now - p->hdr.t_rx_ns) * 1e-6;
+	double lat_ms = (double)(now - est->hdr.t_rx_ns) * 1e-6;
 	uint8_t d[PE_POSE_DGRAM_LEN];
+	pe_pose_msg_t out = *est;
+	const pe_pose_msg_t* p = &out;
+
+	/* Everything published (datagram, pose.csv, STATS) is in the frame chosen
+	 * with io.pose_frame; the estimator keeps working in frame 0 (pipeline.c). */
+	pe_pose_to_frame(g_params.pose_frame, est->x, est->P, out.x, out.P);
 
 	pe_link_account(&link_est, &last_pose_seq, p->hdr.seq);
 	link_est.producer_drops = p->producer_drops;
 	n_pose++;
-	pe_hist_add(&lat_hist, lat_ms);
+	/* A STALE pose repeats the last estimate when no input arrived for
+	 * est.stale_ms, so its age is ~stale_ms by construction. It is not a new
+	 * estimate and does not enter the latency statistics (OE5). */
+	if (!(p->status & PE_ST_STALE)) {
+		pe_hist_add(&lat_hist, lat_ms);
+	}
 	if (last_pub_ns != 0) {
 		pe_hist_add(&int_hist, (double)(now - last_pub_ns) * 1e-6);
 	}
@@ -156,8 +168,9 @@ static void handle_control(char* cmd, const pe_udp_dest_t* from)
 	}
 	else if (strcmp(word, "RESET_POSE") == 0) {
 		pe_ctrl_msg_t* c = &ctrl_pool[ctrl_next];
-		double v[3] = { 0, 0, 0 };
-		sscanf(cmd + 10, "%lf %lf %lf", &v[0], &v[1], &v[2]);
+		double u[3] = { 0, 0, 0 }, v[3];
+		sscanf(cmd + 10, "%lf %lf %lf", &u[0], &u[1], &u[2]);
+		pe_pose_from_frame(g_params.pose_frame, u, v);   /* given in the published frame */
 		memset(c, 0, sizeof(*c));
 		c->hdr.kind = PE_MSG_CTRL;
 		c->hdr.version = 1;
