@@ -18,7 +18,8 @@ loaded wheel diameter.
                   --spin llc_record.txt#4:1
 
 Each test needs >= 3 s at rest before it (gyro bias) and >= 1 s after (motions
-closer than 1 s count as one). Use `llcmux --record-dir` recordings
+closer than 1 s count as one). LLC resets in the recording (the DTR reset when
+olympus_hlc opens its port) are boundaries: no motion is measured across one. Use `llcmux --record-dir` recordings
 (llc_record.txt) or capture_to_replay.py output; the "@<t_rx_ns>" timestamps
 are used for the gyro integration, so the LLC clock error does not matter.
 
@@ -59,10 +60,16 @@ def unwrap(prev_raw, raw, acc):
 
 
 def load_run(path, axis):
-    """Frames (t_s, gz_lsb, encL, encR, imu_ok) with unwrapped encoders."""
+    """Frames (t_s, gz_lsb, encL, encR, imu_ok, epoch) with unwrapped encoders.
+
+    An LLC reset (tick going backwards: power-up, or the DTR pulse llcmux sends
+    when olympus_hlc opens its port) starts a new epoch: the counters restart
+    from zero, so nothing is measured across it. A recording normally has one
+    such reset near its start."""
     out = []
     no_ts = 0
     prev = None
+    epoch = 0
     with open(path) as f:
         for line in f:
             line = line.strip()
@@ -85,14 +92,15 @@ def load_run(path, axis):
                 no_ts += 1
                 t = tick * 1e-3
             if prev is not None and tick < prev[0]:
-                sys.exit('odom_calib: %s: LLC reset inside the run; record one test per file' % path)
+                epoch += 1                       # LLC reset: counters restart
+                prev = None
             if prev is None:
                 L, R = float(encL), float(encR)
             else:
                 L = unwrap(prev[1], encL, out[-1][2])
                 R = unwrap(prev[2], encR, out[-1][3])
             prev = (tick, encL, encR)
-            out.append((t, gyr[axis], L, R, imu_ok))
+            out.append((t, gyr[axis], L, R, imu_ok, epoch))
     if len(out) < 10:
         sys.exit('odom_calib: %s: only %d RAW frames' % (path, len(out)))
     if no_ts:
@@ -113,8 +121,11 @@ def analyse(path, p):
     if not 0 <= k < len(seg):
         sys.exit('odom_calib: %s has %d motions, no #%s' % (path, len(seg), nseg))
     i0, i1 = seg[k][0] - 1, seg[k][1]
-    i_rest0 = seg[k - 1][1] + 1 if k > 0 else 0
-    i_end = seg[k + 1][0] - 1 if k + 1 < len(seg) else len(fr) - 1
+    ep = fr[i0][5]
+    e0 = next(i for i in range(len(fr)) if fr[i][5] == ep)               # first frame of the epoch
+    e1 = max(i for i in range(e0, len(fr)) if fr[i][5] == ep)          # last frame of the epoch
+    i_rest0 = max(seg[k - 1][1] + 1 if k > 0 else 0, e0)
+    i_end = min(seg[k + 1][0] - 1 if k + 1 < len(seg) else len(fr) - 1, e1)
     rest = [f for f in fr[i_rest0:i0 + 1] if f[4]]
     t_rest = fr[i0][0] - fr[i_rest0][0]
     if t_rest < 2.0 or len(rest) < 20:
@@ -139,8 +150,10 @@ def segments(fr, gap_s=1.0):
     """(first, last) frame indices of each motion; rests shorter than gap_s join motions."""
     seg = []
     for i in range(1, len(fr)):
+        if fr[i][5] != fr[i - 1][5]:
+            continue                             # LLC reset between the frames, not motion
         if fr[i][2] != fr[i - 1][2] or fr[i][3] != fr[i - 1][3]:
-            if seg and fr[i][0] - fr[seg[-1][1]][0] < gap_s:
+            if seg and fr[i][0] - fr[seg[-1][1]][0] < gap_s and fr[seg[-1][1]][5] == fr[i][5]:
                 seg[-1][1] = i
             else:
                 seg.append([i, i])
@@ -149,7 +162,8 @@ def segments(fr, gap_s=1.0):
 
 def list_runs(path, p):
     fr = load_run(path, p['axis'])
-    print('%s: %d frames, %.1f s' % (os.path.basename(path), len(fr), fr[-1][0] - fr[0][0]))
+    print('%s: %d frames, %.1f s, %d LLC reset(s)'
+          % (os.path.basename(path), len(fr), fr[-1][0] - fr[0][0], fr[-1][5]))
     for n, (a, b) in enumerate(segments(fr), 1):
         print('  #%d  t %7.1f s  %6.1f s moving  counts R %+d L %+d'
               % (n, fr[a][0] - fr[0][0], fr[b][0] - fr[a - 1][0],
