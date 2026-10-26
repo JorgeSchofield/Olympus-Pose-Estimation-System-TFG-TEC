@@ -16,7 +16,8 @@ SRC_URI = "git://github.com/JorgeSchofield/Olympus-Pose-Estimation-System-TFG-TE
            file://llcmux.default \
 "
 
-# 4fea507: web GUI olympus-pose_gui.py (replaces gps_view.py); a5e816d: GPS viewer
+# 8404afa: io.pose_frame (published axes), STALE out of latency; 4fea507: web GUI
+# olympus-pose_gui.py (replaces gps_view.py); a5e816d: GPS viewer
 # cost; 7896ee5: model/app parity
 # (pipeline.c, est.* exported by the model); ec12765: GPS
 # viewer (gps_view.py, OGP1 datagrams); before that firmware v3.0 frame
@@ -25,7 +26,7 @@ SRC_URI = "git://github.com/JorgeSchofield/Olympus-Pose-Estimation-System-TFG-TE
 # The CMAES library is built from the SAME commit (agents/CMakeLists.txt adds ../CMAES), so the app
 # and the library can never drift apart. The fetcher requires SRCREV to be on
 # branch=main: merge the master->main pull request before running bitbake.
-SRCREV = "4fea507de5fca4dd7d4fdd86fb392351ffd026b9"
+SRCREV = "8404afac70b5c5b4117962ac9d49a42dbc15021c"
 PV = "0.1.0+git"
 
 S = "${WORKDIR}/git"
