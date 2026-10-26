@@ -566,6 +566,31 @@ static void parser_parity(void)
 	printf("  parser parity: %ld lines, %ld accepted, %ld differ from the model\n", n, accepted, differ);
 }
 
+/* Published-pose frame (io.pose_frame): frame 1 = frame 0 rotated +90 deg. */
+static void test_pose_frame(void)
+{
+	double x0[5] = { 1.188, 0.136, 0.2461, 0.01, 0.0045 };
+	double P0[25], x1[5], P1[25], back[3], in[3];
+	int i, j;
+	for (i = 0; i < 5; i++) {
+		for (j = 0; j < 5; j++) {
+			P0[i + 5 * j] = (i == j) ? 0.1 * (i + 1) : 0.01 * (i + j + 1);   /* symmetric */
+		}
+	}
+	pe_pose_to_frame(0, x0, P0, x1, P1);
+	CHECK(memcmp(x0, x1, sizeof(x0)) == 0 && memcmp(P0, P1, sizeof(P0)) == 0, "frame 0 is the identity");
+	pe_pose_to_frame(1, x0, P0, x1, P1);
+	/* forward 1.188 m and 0.136 m to the left -> x = -0.136 (left is -x), y = 1.188 */
+	CHECK(x1[0] == -0.136 && x1[1] == 1.188 && x1[2] == x0[2] && x1[3] == x0[3] && x1[4] == x0[4],
+		"frame 1 position");
+	CHECK(P1[0] == P0[6] && P1[6] == P0[0] && P1[1] == -P0[1] && P1[12] == P0[12]
+		&& P1[0 + 5 * 2] == -P0[1 + 5 * 2] && P1[1 + 5 * 2] == P0[0 + 5 * 2],
+		"frame 1 covariance rotates with the position");
+	in[0] = x1[0]; in[1] = x1[1]; in[2] = x1[2];
+	pe_pose_from_frame(1, in, back);
+	CHECK(back[0] == x0[0] && back[1] == x0[1] && back[2] == x0[2], "RESET_POSE inverse of frame 1");
+}
+
 static void test_replay_parity(void)
 {
 	parser_parity();
@@ -582,6 +607,7 @@ int main(void)
 	test_misc();
 	test_equivalence();
 	test_replay_parity();
+	test_pose_frame();
 	printf("%s: %d checks passed, %d failed\n", n_fail ? "FAIL" : "OK", n_pass, n_fail);
 	return n_fail ? 1 : 0;
 }
