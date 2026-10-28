@@ -3,7 +3,7 @@
 
 DESIGN.md §9.5. The LLC sends one count sum per side, so each side has a single
 constant m_per_tick (thesis eq. 3.1). The model derives it from per-wheel
-measurements (sep_geo_params: diameters, counts per revolution, FR = 2.47 x FL);
+measurements (sep_geo_params: diameters, counts per revolution, k_cal factors);
 this tool measures it on the whole rover, which also absorbs lost counts and the
 loaded wheel diameter.
 
