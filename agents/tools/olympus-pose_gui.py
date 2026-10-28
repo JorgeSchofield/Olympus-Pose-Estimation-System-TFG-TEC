@@ -546,9 +546,10 @@ def load_run(app, run):
 
 # --------------------------------------------------------------------- GPX
 def run_utc_date(run_name):
-    """UTC date of a run folder named YYYYmmdd-HHMMSS in the rover's local time."""
+    """UTC date of a run folder named YYYYmmdd-HHMMSS[_n] in the rover's local time
+    (_n: a second folder with the same stamp, see pe_log_start)."""
     try:
-        t = time.mktime(time.strptime(run_name, '%Y%m%d-%H%M%S'))
+        t = time.mktime(time.strptime(run_name.split('_')[0], '%Y%m%d-%H%M%S'))
     except ValueError:
         t = time.time()
     g = time.gmtime(t)
