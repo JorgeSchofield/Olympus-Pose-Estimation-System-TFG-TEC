@@ -245,7 +245,7 @@ static void test_params(void)
 	CHECK(pe_params_check(&p, err, sizeof(err)) != 0, "defaults alone must miss the model parameters");
 	CHECK(pe_params_load(&p, PE_TEST_CONF, err, sizeof(err)) == 0, "load %s: %s", PE_TEST_CONF, err);
 	CHECK(pe_params_check(&p, err, sizeof(err)) == 0, "shipped config incomplete: %s", err);
-	CHECK(p.prm.P0[3] == 0.01 && p.geo.B_eff == 0.622 && p.ag.loop_ms == 20, "values");
+	CHECK(p.prm.P0[3] == 0.01 && p.geo.B_eff == 0.933 && p.ag.loop_ms == 20, "values");
 	CHECK(p.udp_pose_host2[0] == '\0' && p.cpu_pipeline == 3, "empty string and int");
 	CHECK(pe_params_parse_line(&p, "prm.k_rho = 2e-4", err, sizeof(err)) == 0 && p.prm.k_rho == 2e-4, "update");
 	CHECK(p.dt_source == 0, "shipped time base is the LLC tick");
