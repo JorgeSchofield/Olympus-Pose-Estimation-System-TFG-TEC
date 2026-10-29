@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document | ARQ-PE-003 — Agent architecture and LLC→HLC data path (draft) |
-| Version | v0.15 — 2026-10-27 (week 13). v0.15: first encoder calibration on the rover: FR = 2.47 × FL refuted, one scale 3.9456e-6 m/count (±3 %), chi 1.50; model, `pose.conf` and test vectors updated; `odom_calib.py` measures the gyro bias in every rest (§9.5). v0.14 (2026-10-25): timer-loop LLC firmware verified on the rover (49.9 Hz, clock scale 1.002, 45-min run: OE2 rate, OE4, OE5; §10.4); published pose axes selectable with `io.pose_frame`, frame 1 = x right, y forward (§11.0); STALE poses excluded from latency; 2 m straight run shows a −40 % encoder scale error (R-5). v0.13 (2026-10-22): web GUI `olympus-pose_gui.py` (pose, GPS, test markers, controls, logs, figures, GPX, replay) replaces the GPS viewer (§11.4). v0.12 (2026-10-21): the simulation model and the application now run the same estimation chain (§9.6): event-driven estimator by default in the model, v3.0 frame and `imu_ok` in the simulated LLC, one parser rule set, shared fusion inputs (`est.dt_source`, `est.gyro_yaw_axis` exported by the model); replay- and parser-parity tests V-U-9/V-U-10. v0.11: GPS fixes published as UDP datagrams; GPS web viewer, log replay and GPX export; GPS emulator (§11.4). v0.10 (2026-10-19): first tests on the rover image. `llcmux` pty A now writes whole lines with a leading `\n` (fix for `rover_bridge.recv_tlm()` losing TLM on a quiet link, §6.1); reference frames stated (§11.0); FR wheel counts 2.47 × FL, in the model and `pose.conf`; per-side calibration factors and `odom_calib.py` (§9.5); accelerometer vertical follows `est.gyro_yaw_axis`. v0.9: LLC firmware v3.0 (MPU-9250 driver, `RAW:` frame with `temp` and `imu_ok`, always emitted) supported next to v2.20 (§3.1.1); `est.dt_source` implemented after measuring the LLC clock scale k ≈ 1.87 on the v3.0 captures (§10.4); capture→replay converter, emulator v3/IMU-loss/slow-clock modes. v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
+| Version | v0.16 — 2026-10-29 (week 13). v0.16: first OE6 results on the rover, interim (§16.4): 5 m straight 7.2 cm = 1.42 % (scale confirmed to −0.3 %), 360° spin 9.8° (limit 10.8°); OE4/OE5 evidence from two runs of 24 and 13 min; UMBmark still to do. v0.15 (2026-10-27): first encoder calibration on the rover: FR = 2.47 × FL refuted, one scale 3.9456e-6 m/count (±3 %), chi 1.50; model, `pose.conf` and test vectors updated; `odom_calib.py` measures the gyro bias in every rest (§9.5). v0.14 (2026-10-25): timer-loop LLC firmware verified on the rover (49.9 Hz, clock scale 1.002, 45-min run: OE2 rate, OE4, OE5; §10.4); published pose axes selectable with `io.pose_frame`, frame 1 = x right, y forward (§11.0); STALE poses excluded from latency; 2 m straight run shows a −40 % encoder scale error (R-5). v0.13 (2026-10-22): web GUI `olympus-pose_gui.py` (pose, GPS, test markers, controls, logs, figures, GPX, replay) replaces the GPS viewer (§11.4). v0.12 (2026-10-21): the simulation model and the application now run the same estimation chain (§9.6): event-driven estimator by default in the model, v3.0 frame and `imu_ok` in the simulated LLC, one parser rule set, shared fusion inputs (`est.dt_source`, `est.gyro_yaw_axis` exported by the model); replay- and parser-parity tests V-U-9/V-U-10. v0.11: GPS fixes published as UDP datagrams; GPS web viewer, log replay and GPX export; GPS emulator (§11.4). v0.10 (2026-10-19): first tests on the rover image. `llcmux` pty A now writes whole lines with a leading `\n` (fix for `rover_bridge.recv_tlm()` losing TLM on a quiet link, §6.1); reference frames stated (§11.0); FR wheel counts 2.47 × FL, in the model and `pose.conf`; per-side calibration factors and `odom_calib.py` (§9.5); accelerometer vertical follows `est.gyro_yaw_axis`. v0.9: LLC firmware v3.0 (MPU-9250 driver, `RAW:` frame with `temp` and `imu_ok`, always emitted) supported next to v2.20 (§3.1.1); `est.dt_source` implemented after measuring the LLC clock scale k ≈ 1.87 on the v3.0 captures (§10.4); capture→replay converter, emulator v3/IMU-loss/slow-clock modes. v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
 | Covers | Deliverable "Documento de arquitectura multiagente y protocolo serial LLC-HLC" (OE2, OE4; milestone H2) and the design basis for the OE4/OE5/OE6 validation |
 | Sources | Thesis report *Olympus_pose_TFG.pdf* (ch. 1, 2.1.4–2.1.8, 3.1–3.4, 4); `requirements/DRT-SEP-001.md` v0.2; `requirements/ICD-PE-002.md` v1.0; LLC firmware v2.20 (`Alonso11/rover-low-level-controller`, `src/main.rs`); HLC image (`Alonso11/olympus-hlc-rpi5`, `olympus_hlc` v3.x, `rover_bridge`); CMAES pthreads port (`CMAES/libCMAES_pthreads`); simulation model v2.0 (`JorgeSchofield/olympus-pose-estimation-simulation`, folder `Simulation Model v2.0`) |
 | Status | Implemented (§19); first tests on the rover image 2026-10-19. Section 17 lists the changes this design implies for the thesis report |
@@ -1397,6 +1397,66 @@ Y1–Y3, Y5 and Y10 are done (2026-10-05). Y4, Y6–Y9 are hygiene and remain op
 | PE-RNF-006 (non-interference) | D1, §6 | V-OE5-4, V-OE5-5 |
 | PE-RNF-007 (C99, no dynamic memory, portability) | D12, §15.2 | Inspection + `-std=c99 -Wall -Wextra` build |
 
+### 16.4 Results on the rover so far (interim, 2026-10-28)
+
+Rover image with the timer-loop LLC firmware and the calibrated `pose.conf` of
+2026-10-27 (`m_per_tick` ±3.9455e-6 m, `B_eff` 0.933 m, `io.pose_frame` = 1). Results read
+from the runs' `pose.csv`, `stats.csv` and the GUI's `gui_marks.csv`. No `llcmux` recording
+covers these tests, so V-OE6-4 (replay against the model) is pending. **The
+UMBmark (V-OE6-3) is still to be done**, and the straight run and the spin will be
+repeated.
+
+**V-OE6-1, 5 m straight** (run `20180309-123505`, driven as 8 commands, 156–532 s):
+
+| | Estimate | Real (tape) | Difference |
+|---|---|---|---|
+| Forward (y) | 4.974 m | 5.00 m | −2.6 cm |
+| Sideways (x, to the left) | 0.767 m | 0.70 m | +6.7 cm |
+| Straight-line distance | 5.033 m | 5.049 m | −1.6 cm (−0.3 %) |
+| Path travelled `S` | 5.046 m | — | — |
+| Final heading | +13.1° (left) | not measured | — |
+| **Final position error** | | | **7.2 cm = 1.42 %** (limit 15 cm, 3 %): **pass** |
+
+- The distance along the path is 0.3 % short, which **confirms the interim encoder scale**
+  of 2026-10-27 (±3 % by itself, §9.5). R-5 is closed for straight driving.
+- The remaining error is sideways: the estimate places the rover 6.7 cm further left than
+  it was, i.e. a small heading error during the run. The rover's own left drift (13°
+  over 5 m) is real and tracked by the gyro. The estimated bias stayed within 0.01 °/s and
+  the IMU at 25.3–25.8 °C during the run.
+
+**V-OE6-2, 360° spin clockwise** (same run, 5 commands, 815–1123 s): estimated −350.2°,
+real exactly 360° → **heading error 9.8°** (limit 10.8°): **pass**, with 1° of margin.
+
+- The spin was very slow (mean 1.7 °/s, max 5 °/s, ≈ 212 s of turning). A gyro bias error
+  of 0.047 °/s over that time accounts for the 10°, and the estimated bias moved by exactly
+  that amount right after the spin (−0.136 → −0.089 °/s). A gyro scale error of −2.7 %
+  would give the same result in a single clockwise spin.
+- 31 of the run's 35 IMU dropouts (`imu_ok` = 0) happened during the spin: vibration on the
+  I²C wiring.
+- Repeat: faster spins in fewer commands, one clockwise and one counter-clockwise. A bias
+  error makes one short and the other long; a scale error makes both short, and is then
+  corrected in `ag.gyro_scale`. Secure the IMU wiring first.
+
+**V-OE6-3, UMBmark:** not done yet. The session marked "UMB CW" (run `20180309-130536`)
+covered only 1.64 m forward in 37 commands of 4.6 cm (heading −3.9°, no turns), and the
+session of boot `c145` lost its run folder to the folder-reuse bug (fixed in `cbba3db`).
+
+**OE4 / OE5 evidence** (assuming `olympus_hlc` and vision were running):
+
+| Run | Duration | Pose rate | LLC clock scale | Delivery, every link | HLC latency p50/p95/max | RSS |
+|---|---|---|---|---|---|---|
+| `20180309-123505` | 23.9 min | 49.7 Hz | 1.0024 | 100 %, max consecutive loss 0 | 0.10 / 0.10 / 3.37 ms | 62 304 kB, constant |
+| `20180309-130536` | 12.7 min | 49.8 Hz | 1.0024 | 100 %, 0 | 0.10 / 0.10 / 4.02 ms | constant |
+| `20180309-123509` | 14.0 min (idle) | 49.9 Hz | 1.0024 | 100 %, 0 | 0.10 / 0.10 / 3.20 ms | constant |
+
+No dropped log lines, no agent failure. The longest gaps between poses (2.7 s, 1.7 s) are the
+Arduino resets when `olympus_hlc` opens its port. GPS gave no fixes in these indoor runs.
+
+**Logging issues found:** the 2026-10-28 run folder `20261028-034406` ends in padding (the
+last ≈ 4 s lost) because the rover was powered off while `olympus-pose` was writing, so
+stop it before switching off. Boots with the same clock time reused and overwrote a run
+folder; that is fixed in `cbba3db`, not yet in the rover image.
+
 ---
 
 ## 17. Changes required in the thesis report (*Olympus_pose_TFG.pdf*)
@@ -1664,7 +1724,7 @@ alternatives raised during the design, including the adviser's, are on record:
 | R-2 | Counts-per-revolution anomaly (Hall bounce) | λ, `rate_max_counts_s`, rest detection (bounce would prevent `STILL`) | V-CAL-1; inspect counts while stationary |
 | R-3 | Tail latency on a non-RT kernel with vision load and the powersave governor | OE5 | V-OE5-1 first; then optional `isolcpus`/governor (§10.1) |
 | R-4 | ~~IMU failure stops all frames (fw v2.20)~~ — **closed by firmware v3.0** (`imu_ok`, §3.1.1) | DRT PE-RNF-009 | — |
-| R-5 | Distance scale. First trial −17 % (bench constants); 2026-10-23 −40 % (FR = 2.47 × FL constants); calibration of 2026-10-27: 2.47 × refuted, one scale 3.9456e-6 m/count, ±3 % (runs disagree by 6 %: slip, lost counts or measurement) | OE6 (≤ 3 % error) | Verify with the three 5 m straight runs of V-OE6-1, measured to the mm; if they agree within ±1.5 %, keep it; if consistently off, refit the scale from their recordings (`odom_calib.py --straight rec#a-b:D`) and re-process by replay; if they scatter, look for slip or lost encoder counts before the UMBmark |
+| R-5 | Distance scale. First trial −17 % (bench constants); 2026-10-23 −40 % (FR = 2.47 × FL constants); calibration of 2026-10-27: 2.47 × refuted, one scale 3.9456e-6 m/count, ±3 % (runs disagree by 6 %: slip, lost counts or measurement). **2026-10-28: the 5 m straight run reads 0.3 % short along the path, so the scale is confirmed (§16.4)**; the repeats check that it holds | OE6 (≤ 3 % error) | Verify with the three 5 m straight runs of V-OE6-1, measured to the mm; if they agree within ±1.5 %, keep it; if consistently off, refit the scale from their recordings (`odom_calib.py --straight rec#a-b:D`) and re-process by replay; if they scatter, look for slip or lost encoder counts before the UMBmark |
 | R-6 | `rover_bridge.recv_tlm()` drops a byte after its 50 ms deadline (§6.1) | `olympus_hlc` telemetry | Worked around in `llcmux`; report upstream |
 
 ---
