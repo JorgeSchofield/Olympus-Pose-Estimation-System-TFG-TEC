@@ -118,9 +118,30 @@ int pe_log_start(const char* base, char* run_dir, size_t run_dir_len)
 		}
 		mkdir(p, 0755);
 	}
-	snprintf(run_dir_path, sizeof(run_dir_path), "%s/%s", base, stamp);
-	if (mkdir(run_dir_path, 0755) != 0 && errno != EEXIST) {
-		return -1;
+	/* The run folder must be NEW. The rover has no battery clock: it boots at
+	 * the same time every time, so a daemon started at boot gets the same
+	 * stamp, and reusing that folder truncated the previous run's files
+	 * (fopen "w" in pe_log_open). If the folder exists, try stamp_2, stamp_3,
+	 * ... up to 999. */
+	{
+		int k, made = 0;
+		for (k = 1; k <= 999 && !made; k++) {
+			if (k == 1) {
+				snprintf(run_dir_path, sizeof(run_dir_path), "%s/%s", base, stamp);
+			}
+			else {
+				snprintf(run_dir_path, sizeof(run_dir_path), "%s/%s_%d", base, stamp, k);
+			}
+			if (mkdir(run_dir_path, 0755) == 0) {
+				made = 1;
+			}
+			else if (errno != EEXIST) {
+				return -1;
+			}
+		}
+		if (!made) {
+			return -1;
+		}
 	}
 	if (run_dir != NULL) {
 		snprintf(run_dir, run_dir_len, "%s", run_dir_path);
