@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document | ARQ-PE-003 — Agent architecture and LLC→HLC data path (draft) |
-| Version | v0.18 — 2026-11-09. v0.18: 5 m straight re-computed at the front of the chassis, where it was measured (10.8 cm = 2.1 %); descriptive statistics of all rover runs and the limits of the data (§16.4); no more driving tests. v0.17: UMBmark on the rover (§16.4): final position error 11.7 cm CW and 11.5 cm CCW (limit 24 cm); 360° CCW turn 6.07°. v0.16 (2026-10-29): first OE6 results on the rover, interim (§16.4): 5 m straight 7.2 cm = 1.42 % (scale confirmed to −0.3 %), 360° spin 9.8° (limit 10.8°); OE4/OE5 evidence from two runs of 24 and 13 min; UMBmark still to do. v0.15 (2026-10-27): first encoder calibration on the rover: FR = 2.47 × FL refuted, one scale 3.9456e-6 m/count (±3 %), chi 1.50; model, `pose.conf` and test vectors updated; `odom_calib.py` measures the gyro bias in every rest (§9.5). v0.14 (2026-10-25): timer-loop LLC firmware verified on the rover (49.9 Hz, clock scale 1.002, 45-min run: OE2 rate, OE4, OE5; §10.4); published pose axes selectable with `io.pose_frame`, frame 1 = x right, y forward (§11.0); STALE poses excluded from latency; 2 m straight run shows a −40 % encoder scale error (R-5). v0.13 (2026-10-22): web GUI `olympus-pose_gui.py` (pose, GPS, test markers, controls, logs, figures, GPX, replay) replaces the GPS viewer (§11.4). v0.12 (2026-10-21): the simulation model and the application now run the same estimation chain (§9.6): event-driven estimator by default in the model, v3.0 frame and `imu_ok` in the simulated LLC, one parser rule set, shared fusion inputs (`est.dt_source`, `est.gyro_yaw_axis` exported by the model); replay- and parser-parity tests V-U-9/V-U-10. v0.11: GPS fixes published as UDP datagrams; GPS web viewer, log replay and GPX export; GPS emulator (§11.4). v0.10 (2026-10-19): first tests on the rover image. `llcmux` pty A now writes whole lines with a leading `\n` (fix for `rover_bridge.recv_tlm()` losing TLM on a quiet link, §6.1); reference frames stated (§11.0); FR wheel counts 2.47 × FL, in the model and `pose.conf`; per-side calibration factors and `odom_calib.py` (§9.5); accelerometer vertical follows `est.gyro_yaw_axis`. v0.9: LLC firmware v3.0 (MPU-9250 driver, `RAW:` frame with `temp` and `imu_ok`, always emitted) supported next to v2.20 (§3.1.1); `est.dt_source` implemented after measuring the LLC clock scale k ≈ 1.87 on the v3.0 captures (§10.4); capture→replay converter, emulator v3/IMU-loss/slow-clock modes. v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
+| Version | v0.19 — 2026-11-11. v0.19: V-OE6-4 as a comparison of outcomes with the model (§16.4): ideal model ≈ 2 cm on the UMBmark, model matched to the rover 15.2 cm CW and 20.3 cm CCW against 11.7 and 11.5 cm. Replay of the one rover recording (2026-10-28) gives the rover's poses to 6.9e-7 m. v0.18 (2026-11-09): 5 m straight re-computed at the front of the chassis, where it was measured (10.8 cm = 2.1 %); descriptive statistics of all rover runs and the limits of the data (§16.4); no more driving tests. v0.17: UMBmark on the rover (§16.4): final position error 11.7 cm CW and 11.5 cm CCW (limit 24 cm); 360° CCW turn 6.07°. v0.16 (2026-10-29): first OE6 results on the rover, interim (§16.4): 5 m straight 7.2 cm = 1.42 % (scale confirmed to −0.3 %), 360° spin 9.8° (limit 10.8°); OE4/OE5 evidence from two runs of 24 and 13 min; UMBmark still to do. v0.15 (2026-10-27): first encoder calibration on the rover: FR = 2.47 × FL refuted, one scale 3.9456e-6 m/count (±3 %), chi 1.50; model, `pose.conf` and test vectors updated; `odom_calib.py` measures the gyro bias in every rest (§9.5). v0.14 (2026-10-25): timer-loop LLC firmware verified on the rover (49.9 Hz, clock scale 1.002, 45-min run: OE2 rate, OE4, OE5; §10.4); published pose axes selectable with `io.pose_frame`, frame 1 = x right, y forward (§11.0); STALE poses excluded from latency; 2 m straight run shows a −40 % encoder scale error (R-5). v0.13 (2026-10-22): web GUI `olympus-pose_gui.py` (pose, GPS, test markers, controls, logs, figures, GPX, replay) replaces the GPS viewer (§11.4). v0.12 (2026-10-21): the simulation model and the application now run the same estimation chain (§9.6): event-driven estimator by default in the model, v3.0 frame and `imu_ok` in the simulated LLC, one parser rule set, shared fusion inputs (`est.dt_source`, `est.gyro_yaw_axis` exported by the model); replay- and parser-parity tests V-U-9/V-U-10. v0.11: GPS fixes published as UDP datagrams; GPS web viewer, log replay and GPX export; GPS emulator (§11.4). v0.10 (2026-10-19): first tests on the rover image. `llcmux` pty A now writes whole lines with a leading `\n` (fix for `rover_bridge.recv_tlm()` losing TLM on a quiet link, §6.1); reference frames stated (§11.0); FR wheel counts 2.47 × FL, in the model and `pose.conf`; per-side calibration factors and `odom_calib.py` (§9.5); accelerometer vertical follows `est.gyro_yaw_axis`. v0.9: LLC firmware v3.0 (MPU-9250 driver, `RAW:` frame with `temp` and `imu_ok`, always emitted) supported next to v2.20 (§3.1.1); `est.dt_source` implemented after measuring the LLC clock scale k ≈ 1.87 on the v3.0 captures (§10.4); capture→replay converter, emulator v3/IMU-loss/slow-clock modes. v0.8: sysvinit confirmed; S-1 passed; simulation model step 3 done (fusion/estimation wrappers, codegen, parameter export); application, `llcmux` and Yocto recipe implemented (§19). v0.7: OE3 stress test PASS on the RPi 5 (H3 closed); spike S-1 partial, script fixed. v0.6: CMAES library items L1–L3, L5, L6, Y6, Y9 done; `rps_stress` OE3 test demo. v0.5: blocking layer items Y1–Y3, Y5 fixed and committed. v0.4: review of `meta-olympus-pose` (§15.4), init system unconfirmed so both init flavours are shipped, app builds CMAES from the same commit. v0.3: gateway-agent alternative rejected, systemd units, pose layer carries the udev change, Coder license confirmed. v0.2 (2026-10-01): pty naming decided (udev rename), GPS on the GPIO UART, simulation model v2.0 reviewed, C core generated with MATLAB Coder from unchanged core files, RAW filtering in `llcmux` |
 | Covers | Deliverable "Documento de arquitectura multiagente y protocolo serial LLC-HLC" (OE2, OE4; milestone H2) and the design basis for the OE4/OE5/OE6 validation |
 | Sources | Thesis report *Olympus_pose_TFG.pdf* (ch. 1, 2.1.4–2.1.8, 3.1–3.4, 4); `requirements/DRT-SEP-001.md` v0.2; `requirements/ICD-PE-002.md` v1.0; LLC firmware v2.20 (`Alonso11/rover-low-level-controller`, `src/main.rs`); HLC image (`Alonso11/olympus-hlc-rpi5`, `olympus_hlc` v3.x, `rover_bridge`); CMAES pthreads port (`CMAES/libCMAES_pthreads`); simulation model v2.0 (`JorgeSchofield/olympus-pose-estimation-simulation`, folder `Simulation Model v2.0`) |
 | Status | Implemented (§19); first tests on the rover image 2026-10-19. Section 17 lists the changes this design implies for the thesis report |
@@ -1402,7 +1402,7 @@ Y1–Y3, Y5 and Y10 are done (2026-10-05). Y4, Y6–Y9 are hygiene and remain op
 Rover image with the timer-loop LLC firmware and the calibrated `pose.conf` of
 2026-10-27 (`m_per_tick` ±3.9455e-6 m, `B_eff` 0.933 m, `io.pose_frame` = 1). Results read
 from the runs' `pose.csv`, `stats.csv` and the GUI's `gui_marks.csv`. No `llcmux` recording
-covers these tests, so V-OE6-4 (replay against the model) is pending. So far: one 5 m
+covers these tests, so V-OE6-4 compares outcomes with the model instead of replaying the runs. So far: one 5 m
 straight run, one 360° turn each way and one UMBmark each way.
 
 **V-OE6-1, 5 m straight** (run `20180309-123505`, driven as 8 commands, 156–532 s):
@@ -1528,6 +1528,58 @@ IMU reads for OE1: run `20261105-014205` has 96 590 frames with `imu_bad_frames`
 the 45 000 required. Earlier runs were not clean: 19 bad frames of 80 305 in `20261030-021527`,
 nearly all during turns. The electrical part of OE1 (noise margins, rise time) has not been
 measured.
+
+**V-OE6-4, model against the rover.** No recording covers the tests, so the model runs the
+same tests and the outcomes are compared (`run_sep_oe6_compare.m` in the simulation
+repository, 30 seeds per test and level, MATLAB loop). The estimator is the same in model and
+application (V-U-10), so the differences come from the plant and the sensors. Two levels:
+
+- **Ideal:** the model's parameters, a healthy rover, the model's default speeds.
+- **Matched to the rover:** the real mean speeds (1.65 cm/s, 1.42 °/s); 4.29 % slip on the
+  left wheels, giving 2.60 °/m of left drift with both sides counting alike; gyro scale
+  −2.20 %; distance scale so the 5 m run reads 0.3 % short. These values come only from the
+  5 m run and the two turns, so the UMBmark results are a prediction. The UMBmark sides take
+  the tape lengths, the operator turns each corner until the rover lines up with the next
+  side, and the error is taken at the front of the chassis, as on the rover.
+
+| Test | Rover | Ideal model (mean ± SD) | Matched model (mean ± SD) | Rover against matched (SD) | Role |
+|---|---|---|---|---|---|
+| 5 m straight, cm | 10.80 | 3.76 ± 2.65 | 7.39 ± 4.06 | +0.84 | Sets the model |
+| 360° CW, degrees | 9.80 | 0.12 ± 0.09 | 7.20 ± 1.04 | +2.51 | Sets the model |
+| 360° CCW, degrees | 6.07 | 0.16 ± 0.14 | 7.11 ± 1.50 | −0.70 | Sets the model |
+| UMBmark CW, cm | 11.70 | 1.87 ± 1.28 | 15.24 ± 3.94 | −0.90 | Prediction |
+| UMBmark CCW, cm | 11.50 | 1.94 ± 1.20 | 20.27 ± 3.88 | −2.26 | Prediction |
+
+- On a healthy rover the model gets about 2 cm on the UMBmark and 0.1–0.2° on the turns. The
+  rover's errors are about six times larger, and its condition accounts for most of that.
+- Every mean is within the OE6 limits, on the rover and in both models.
+- Three of the five rover results are within 2 SD of the matched model. Of the two
+  predictions, CW is within and CCW is over-predicted (20.3 cm against 11.5 cm). The likely
+  cause is the −2.2 % gyro scale taken from the turns, which also makes the real squares
+  worse when applied to them (V-OE6-2 above); this was not tested separately.
+- The seeds vary only the sensor noise, not the operator, the floor or the rover's changing
+  structure, so the SDs are narrow and a rover result 2.3–2.5 SD away is weak evidence of a
+  mismatch. The claim is that the model explains the size of the errors, not that it
+  reproduces each run.
+- Run with the simulation's LLC and IMU parameters of 2026-11-11 (LLC timer clock, DLPF
+  10 Hz, gyro bias 0.0045 rad/s).
+
+**Replay on rover data.** The one raw recording from the rover (`Test1`, run
+`20261028-034406`, 2026-10-28) was run through `hlc_replay.m` from the moment the app opened
+its input, and compared with that run's `pose.csv` frame by frame. It covers start-up, small
+moves (0.14 m of the run's 0.18 m) and an LLC reset in the middle of the run, but no OE6 test.
+
+| Check | Result |
+|---|---|
+| Poses compared (same input frame) | 5 740, all the replay produced |
+| Largest difference: position / heading / distance | 6.9e-7 m / 5.0e-7 rad / 5.0e-7 m |
+| Frames rejected (parser / fusion) | 0 / 0 |
+
+The differences are the 6-decimal rounding of `pose.csv`, and the model's parameters equal the
+run's header. The last 511 poses (≈ 10 s) have no recording: the file lost its end when the
+rover was switched off while writing. This confirms V-U-10 on rover data, so a replay of each
+test would return the rover's own poses: the model comparison of OE6 is the outcome comparison
+above.
 
 **Limits of the data.** The rover's legs and wheels no longer support the chassis well, which
 contributes to the left drift and tilt in these results. To protect it for the demo no more
