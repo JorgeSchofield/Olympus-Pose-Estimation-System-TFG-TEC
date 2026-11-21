@@ -72,7 +72,7 @@ cumplir `RNF-003` en ese escenario, con 2 puntos porcentuales de margen.
 | Tema | v0.3 | v1.0 |
 |---|---|---|
 | Reloj del LLC | Hipótesis sin verificar | Verificado en el róver (escala 1,465 con el lazo original) y corregido con el firmware v3.0 por temporizador (escala 1,0024, 49,88 Hz). `R-02` cerrado |
-| Interfaz de la IMU | Traductor de niveles previsto | Conexión directa con las resistencias de pull-up de 3,3 V del módulo; desviación aceptada de `PE-RF-001` (§ 8) |
+| Interfaz de la IMU | Traductor de niveles previsto | Conexión directa con las resistencias de pull-up de 3,3 V del módulo, alimentada desde el pin de 3,3 V del Arduino Mega; desviación aceptada de `PE-RF-001` (§ 8) |
 | Parámetros | $\chi$, sesgo y deriva del giroscopio pendientes | Medidos (Anexo B.1); siguen pendientes $\delta_{th}$ y el error de escala del giroscopio |
 | Cuentas por vuelta | Anomalía abierta | La calibración y la hoja de datos del motor apuntan a una medición de banco errónea (Anexo B.2) |
 | Estado de verificación | — | Nueva § 8 con el estado de cada requerimiento |
@@ -95,7 +95,7 @@ cumplir `RNF-003` en ese escenario, con 2 puntos porcentuales de margen.
 | `IF-01` | Telemetría heredada (ICD-LLC-001 v1.3) | TLM ASCII extendida de 26 campos, una vez cada 50 ciclos del LLC, y comandos con semántica ACK/ERR. **Preexistente; el SEP no la modifica.** | LLC ↔ HLC |
 | `IF-02` | Canal de sensores (ICD-PE-002 v2.0) | Trama de sensores una vez por ciclo del LLC sobre el mismo enlace USART0 → USB a 115 200 baud. Formato vigente: RAW ASCII. Formato objetivo: SENSOR binaria con CRC. | LLC → HLC |
 | `IF-03` | GPS GY-GPSV3-NEO | NMEA sobre UART o USB al HLC. **Nunca entra al filtro.** | GPS → HLC |
-| `IF-04` | MPU-9250 | I²C por software (D42 = SDA, D43 = SCL), dirección 0x68, ≈ 100 kHz, a través de un traductor de niveles 5 V / 3,3 V. Giroscopio ±250 °/s (131 LSB/(°/s)); acelerómetro ±2 g (16 384 LSB/g). | IMU → LLC |
+| `IF-04` | MPU-9250 | I²C por software (D42 = SDA, D43 = SCL), dirección 0x68, ≈ 59 kHz medidos (modo estándar), conexión directa con las resistencias de pull-up de 10 kΩ a 3,3 V del módulo y alimentación desde el pin de 3,3 V del Arduino Mega. Giroscopio ±250 °/s (131 LSB/(°/s)); acelerómetro ±2 g (16 384 LSB/g). | IMU → LLC |
 | `IF-05` | Bus de mensajería CMAES | Buzones de profundidad 1 con paso de punteros. | Interno HLC |
 | `IF-06` | Publicación de pose | Salida del agente de comunicación hacia el sistema de navegación existente y hacia el registro de validación. | HLC → externo |
 
@@ -153,7 +153,7 @@ Métodos de verificación: **T** = prueba, **A** = análisis, **D** = demostraci
 |---|---|---|
 | `PE-CON-001` | El GPS **nunca** entra como medición del filtro. | Decisión de diseño del TFG |
 | `PE-CON-002` | La decodificación de cuadratura es **×2**: ambos flancos de la fase A; la fase B solo da el sentido. | `main.rs`, ISR INT0 a INT5 |
-| `PE-CON-003` | El MPU-9250 usa el bus I²C por software D42/D43 a ≈ 100 kHz (modo estándar). No hay TWI por hardware disponible: D20/D21 están ocupados por INT0/INT1. | `soft_i2c.rs`; tabla de pines |
+| `PE-CON-003` | El MPU-9250 usa el bus I²C por software D42/D43 en modo estándar (≤ 100 kHz; ≈ 59 kHz medidos). No hay TWI por hardware disponible: D20/D21 están ocupados por INT0/INT1. | `soft_i2c.rs`; tabla de pines |
 | `PE-CON-004` | La configuración de compilación del LLC queda congelada durante la campaña de pruebas. El mapeo de la fase B de FR/FL depende del feature activo; compilar con el feature incorrecto invierte el signo de dos ruedas sin error. | `main.rs` |
 | `PE-CON-005` | El andamiaje de EKF del LLC permanece deshabilitado. Al habilitar la IMU, el feature `no-mpu` debe separarse en lectura de IMU y filtro local, con el filtro local desactivado por omisión. | `main.rs`, `Cargo.toml` |
 | `PE-CON-006` | La evaluación de precisión usa marcadores fijos medidos con cinta métrica como referencia principal. El GPS (2,5 m CEP) no puede certificar un 3 % en las trayectorias previstas: necesitaría ≥ 520 m con criterio 3:1 sobre el radio de 95 %, unas 5 h a 2,9 cm/s. | § 6.2; Anexo B.3 |
