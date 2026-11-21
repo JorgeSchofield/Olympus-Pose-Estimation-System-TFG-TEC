@@ -1,0 +1,267 @@
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -17,10 +17,19 @@
+ 
+ // ─── Loop principal ───────────────────────────────────────────────────────────
+ 
+-/// Duración de cada ciclo del loop principal en ms.
++/// Periodo del loop principal en ms.
++///
++/// [PATCH timer-loop] Antes era la duración de `delay_ms(LOOP_MS)` al final de
++/// cada ciclo, de modo que el ciclo real duraba LOOP_MS + el trabajo del ciclo
++/// (28–49 ms medidos en el rover, 34 Hz). Ahora es el PERIODO: el loop espera
++/// una fecha límite absoluta en múltiplos de LOOP_MS, medida con la base de
++/// tiempo de 1 ms del Timer0 (`millis()` en main.rs). Mientras el trabajo de
++/// un ciclo sea menor que LOOP_MS, el loop corre exactamente a 1000/LOOP_MS Hz.
+ pub const LOOP_MS: u32 = 20;
+ 
+ /// Ciclos entre emisiones de telemetría periódica (~1 s a 20 ms/ciclo).
++/// [PATCH timer-loop] Con el loop por fecha límite, "~1 s" es ahora 1.00 s
++/// real (antes ~1.47 s, porque cada ciclo duraba ~29 ms).
+ pub const TLM_PERIOD: u8 = 50;
+ 
+ /// Tamaño del buffer de respuesta ASCII en bytes.
+@@ -153,6 +162,44 @@
+ /// Muestras ADC por canal en el chequeo rápido (2 × ~104 µs ≈ 208 µs/canal).
+ pub const SEN_FAST_SAMPLES: u8 = 2;
+ 
++// ─── [PATCH timer-loop] Desfase de las tareas lentas ─────────────────────────
++//
++// Cada tarea periódica lleva un contador que se incrementa al inicio de su
++// bloque y dispara cuando llega a su periodo. Con todos los contadores en 0,
++// el ciclo 50 ejecutaba a la vez el HC-SR04 (cada 5), la lectura analógica
++// completa (cada 25, ~10.8 ms bloqueantes) y la TLM (cada 50, ~8.7 ms de TX
++// bloqueante): ese ciclo duraba ~49 ms (máximo medido en el rover).
++//
++// Arrancando los contadores con un desfase, cada tarea dispara en ciclos
++// distintos. Un contador que arranca en F con periodo P dispara por primera
++// vez en el ciclo P − F y luego cada P ciclos:
++//   HC-SR04   (fase 0):  ciclos ≡ 0  (mód 5)
++//   analógico (fase 2):  ciclos ≡ 23 (mód 25)  → ≡ 3 (mód 5): nunca con el HC
++//   TLM       (fase 37): ciclos ≡ 13 (mód 50)  → ≡ 3 (mód 5) y ≡ 13 (mód 25):
++//                        nunca con el HC ni con la lectura analógica
++// Peor ciclo esperado ≈ 8 ms (IMU + TX de la trama RAW) + 10.8 ms (analógico)
++// ≈ 18.8 ms, dentro del periodo de 20 ms.
++
++/// Valor inicial de `sen_counter` (lectura analógica completa).
++pub const SEN_PHASE: u8 = 2;
++
++/// Valor inicial de `tlm_counter` (telemetría periódica).
++pub const TLM_PHASE: u8 = 37;
++
++// Comprobación en compilación: si alguien cambia un periodo o una fase de forma
++// que dos tareas lentas vuelvan a coincidir, el firmware no compila.
++// La prueba es exacta mientras TLM_PERIOD sea múltiplo de SEN_READ_PERIOD y
++// ambos lo sean de HC_READ_PERIOD (también se verifica aquí).
++const _: () = {
++    let tlm_first = TLM_PERIOD - TLM_PHASE;      // ciclo del primer disparo de TLM
++    let sen_first = SEN_READ_PERIOD - SEN_PHASE; // ídem lectura analógica
++    assert!(TLM_PHASE < TLM_PERIOD && SEN_PHASE < SEN_READ_PERIOD);
++    assert!(TLM_PERIOD % SEN_READ_PERIOD == 0 && SEN_READ_PERIOD % HC_READ_PERIOD == 0);
++    assert!(sen_first % HC_READ_PERIOD != 0);                  // analógico ≠ HC-SR04
++    assert!(tlm_first % HC_READ_PERIOD != 0);                  // TLM ≠ HC-SR04
++    assert!(tlm_first % SEN_READ_PERIOD != sen_first % SEN_READ_PERIOD); // TLM ≠ analógico
++};
++
+ // ─── Hardware de monitorización ──────────────────────────────────────────────
+ 
+ /// Resistencia de shunt del INA226 en mΩ.
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -155,6 +155,83 @@
+     ENCODER_RL.on_edge((pine & (1 << 5)) != 0, (pinl & (1 << 0)) != 0);
+ }
+ 
++// ─── [PATCH timer-loop] Base de tiempo de 1 ms (Timer0 overflow) ─────────────
++//
++// Problema que resuelve: el loop terminaba con delay_ms(LOOP_MS), así que cada
++// ciclo duraba LOOP_MS + el trabajo del ciclo (IMU, TX bloqueante de la trama
++// RAW, ADC, TLM...), y el timestamp `elapsed_ms` sumaba 20 por ciclo aunque el
++// ciclo durara 28–49 ms. Medido en el rover: 34 Hz y un reloj del LLC al 68 %
++// del tiempo real (llc_clock_scale = 1.465). Ver README.md del parche.
++//
++// Solución: un contador de milisegundos reales alimentado por la interrupción
++// de desborde del Timer0, como millis() de Arduino.
++//
++// Timer0 en modo Fast PWM de 8 bits con prescaler 64:
++//   desborde cada 64 × 256 / 16 MHz = 1024 µs = 1 ms + 24 µs.
++// Cada desborde suma 1 ms y acumula 24 µs en una fracción guardada en
++// unidades de 8 µs (24/8 = 3, 1000/8 = 125); cuando la fracción llega a
++// 1 ms se suma un ms extra. Error acumulado nulo (salvo el del cristal).
++//
++// El Timer0 ya corre así en los builds `mixed-drivers` y `all-bts7960`
++// (Timer0Pwm::new(dp.TC0, Prescale64), PWM de D4/OC0B y D13/OC0A): habilitar
++// su interrupción de desborde NO cambia el PWM. En los builds que no usan el
++// Timer0 para PWM, timebase_init() lo configura igual, sin salidas.
++
++/// Registros del Timer0 (direcciones de data memory del ATmega2560).
++const TCCR0A_ADDR: *mut u8 = 0x44 as *mut u8; // COM0A/COM0B (salidas PWM) y WGM01:0
++const TCCR0B_ADDR: *mut u8 = 0x45 as *mut u8; // WGM02 y prescaler CS02:0
++const TIMSK0_ADDR: *mut u8 = 0x6E as *mut u8; // bit 0 = TOIE0 (interrupción de desborde)
++
++/// Milisegundos reales desde timebase_init(). Desborda cada ~49.7 días, igual
++/// que el `elapsed_ms` anterior; el HLC ya resta los ticks con aritmética u32.
++static MILLIS: avr_device::interrupt::Mutex<core::cell::Cell<u32>> =
++    avr_device::interrupt::Mutex::new(core::cell::Cell::new(0));
++/// Fracción de ms acumulada, en unidades de 8 µs (0..124).
++static MILLIS_FRAC: avr_device::interrupt::Mutex<core::cell::Cell<u8>> =
++    avr_device::interrupt::Mutex::new(core::cell::Cell::new(0));
++
++/// ISR de desborde del Timer0: cada 1024 µs.
++#[avr_device::interrupt(atmega2560)]
++fn TIMER0_OVF() {
++    avr_device::interrupt::free(|cs| {
++        let ms_cell = MILLIS.borrow(cs);
++        let frac_cell = MILLIS_FRAC.borrow(cs);
++        let mut ms = ms_cell.get().wrapping_add(1);
++        let mut frac = frac_cell.get() + 3; // 24 µs = 3 × 8 µs
++        if frac >= 125 {                    // 125 × 8 µs = 1 ms
++            frac -= 125;
++            ms = ms.wrapping_add(1);
++        }
++        ms_cell.set(ms);
++        frac_cell.set(frac);
++    });
++}
++
++/// Milisegundos reales desde el arranque (lectura atómica del contador de 32 bits).
++fn millis() -> u32 {
++    avr_device::interrupt::free(|cs| MILLIS.borrow(cs).get())
++}
++
++/// Configura el Timer0 como base de tiempo (Fast PWM 8 bits, prescaler 64) y
++/// habilita su interrupción de desborde. Llamar DESPUÉS de crear los Timer*Pwm
++/// y ANTES de `avr_device::interrupt::enable()`.
++///
++/// Lectura-modificación-escritura: no toca COM0A/COM0B, de modo que el PWM de
++/// los pines del Timer0 sigue igual en los builds que lo usan.
++fn timebase_init() {
++    unsafe {
++        // TCCR0A: WGM01 = 1, WGM00 = 1 → Fast PWM, TOP = 0xFF. Bits COM intactos.
++        let a = core::ptr::read_volatile(TCCR0A_ADDR);
++        core::ptr::write_volatile(TCCR0A_ADDR, a | 0b0000_0011);
++        // TCCR0B: WGM02 = 0, CS02:0 = 011 → prescaler 64. FOC0A/B quedan en 0.
++        let b = core::ptr::read_volatile(TCCR0B_ADDR);
++        core::ptr::write_volatile(TCCR0B_ADDR, (b & !0b0000_1111) | 0b0000_0011);
++        // TIMSK0: TOIE0 = 1.
++        let m = core::ptr::read_volatile(TIMSK0_ADDR);
++        core::ptr::write_volatile(TIMSK0_ADDR, m | 0b0000_0001);
++    }
++}
++
+ // ─── Ring buffer USART RX (interrupt-driven) ─────────────────────────────────
+ //
+ // El FIFO hardware USART del ATmega2560 tiene solo 3 bytes. Con delay_ms(20)
+@@ -627,6 +704,10 @@
+     dp.EXINT.eicra().write(|w| unsafe { w.bits(0x55) });
+     dp.EXINT.eicrb().write(|w| unsafe { w.bits(0x05) });
+     dp.EXINT.eimsk().write(|w| unsafe { w.bits(0x3F) });
++    // [PATCH timer-loop] Base de tiempo de 1 ms. Va aquí porque los Timer*Pwm ya
++    // se crearon (Timer0Pwm::new escribe TCCR0A/B) y las interrupciones aún no
++    // están habilitadas: el primer desborde ya encuentra la ISR lista.
++    timebase_init();
+     unsafe { avr_device::interrupt::enable() };
+ 
+     // ── Estado del loop ──────────────────────────────────────────────────────
+@@ -635,11 +716,17 @@
+     // para evitar picos de back-EMF en frenadas bruscas. Ver src/ramp.rs.
+     let mut ramp             = DriveRamp::new();
+     let mut resp_buf         = [0u8; RESP_BUF];
+-    let mut tlm_counter:      u8 = 0;
++    // [PATCH timer-loop] tlm_counter y sen_counter arrancan desfasados para que la
++    // TLM, la lectura analógica completa y el HC-SR04 nunca caigan en el mismo
++    // ciclo (ver TLM_PHASE / SEN_PHASE en config.rs). Antes los tres arrancaban
++    // en 0 y coincidían cada 50 ciclos (ciclo de ~49 ms).
++    let mut tlm_counter:      u8 = TLM_PHASE;
+     let mut hc_counter:       u8 = 0;
+-    let mut sen_counter:      u8 = 0;
++    let mut sen_counter:      u8 = SEN_PHASE;
+     let mut sen_fast_counter: u8 = 0;
+-    let mut elapsed_ms:      u32 = 0; // timestamp relativo desde arranque (overflow ~49 días)
++    // [PATCH timer-loop] Se eliminó `elapsed_ms` (20 × ciclos). El timestamp ahora
++    // es tiempo REAL: millis() en la trama RAW (sample_ms) y en sensor_frame.tick_ms
++    // (campo t=…ms de la TLM).
+     let mut sensor_frame = SensorFrame::ZERO; // última lectura de ACS712 + LM335
+ 
+ 
+@@ -687,6 +774,12 @@
+     // defecto, ver sección 0 del loop).
+     let mut motors_energized = true;
+ 
++    // [PATCH timer-loop] Fecha límite absoluta del ciclo en curso (ms de millis()).
++    // Avanza LOOP_MS por ciclo y NO depende de cuánto trabajó el ciclo, de modo que
++    // el periodo medio es exactamente LOOP_MS. Se toma aquí, después de la
++    // calibración inicial de los ACS712 y del banner, para no empezar atrasado.
++    let mut next_deadline: u32 = millis().wrapping_add(LOOP_MS);
++
+     // ── Bucle principal ───────────────────────────────────────────────────────
+     loop {
+         // 0. Gestión de energía del driver según el estado del MSM (DEFAULT).
+@@ -833,6 +926,13 @@
+             // de ~2 ms). Esa simultaneidad es la razón de tener el IMU en el LLC.
+             #[cfg(not(feature = "no-mpu"))]
+             let imu_sample = mpu.read_raw();
++            // [PATCH timer-loop] Instante real de esta muestra, tomado justo antes de
++            // leer los contadores (el IMU se leyó ~1 ms antes, desfase constante).
++            // Es el campo tick de la trama RAW: el HLC calcula dt como diferencia
++            // de ticks, así que ahora dt es el tiempo real entre muestras, incluido
++            // el jitter de cada ciclo. Antes era 20 × ciclos (elapsed_ms).
++            #[cfg(not(feature = "no-mpu"))]
++            let sample_ms = millis();
+             let counts = [
+                 ENCODER_FR.get_counts(), ENCODER_FL.get_counts(),
+                 ENCODER_CR.get_counts(), ENCODER_CL.get_counts(),
+@@ -855,7 +955,7 @@
+                 let mut raw_buf = [0u8; 100];
+                 let mut r_i = 0;
+                 for &b in b"RAW:" { raw_buf[r_i] = b; r_i += 1; }
+-                write_u32(elapsed_ms, &mut raw_buf, &mut r_i);
++                write_u32(sample_ms, &mut raw_buf, &mut r_i); // [PATCH timer-loop] antes: elapsed_ms
+                 for val in &[ax, ay, az, gx, gy, gz] {
+                     raw_buf[r_i] = b':'; r_i += 1;
+                     write_i32(*val as i32, &mut raw_buf, &mut r_i);
+@@ -1135,14 +1235,36 @@
+             }
+         }
+ 
+-        // Actualizar timestamp relativo antes del delay para que el próximo
+-        // ciclo (y el TLM periódico) reflejen el tiempo acumulado real.
+-        elapsed_ms = elapsed_ms.wrapping_add(LOOP_MS);
+-        sensor_frame.tick_ms = elapsed_ms;
+-
+-        // delay_ms restaurado: la ISR USART0_RX garantiza que ningún byte
+-        // se pierde durante el bloqueo. Ver docs/debug_usart_overflow.md.
+-        arduino_hal::delay_ms(LOOP_MS);
++        // [PATCH timer-loop] Espera hasta la fecha límite absoluta del ciclo, en
++        // lugar de delay_ms(LOOP_MS).
++        //
++        // Antes: el ciclo duraba LOOP_MS + trabajo (28 ms típico, 49 ms máximo
++        // medidos), es decir ~34 Hz, y elapsed_ms sumaba 20 por ciclo, así que el
++        // reloj del LLC corría al ~68 % del tiempo real.
++        //
++        // Ahora: se espera hasta next_deadline, que avanza LOOP_MS por ciclo.
++        //   - Ciclo normal (trabajo < LOOP_MS): espera el resto → periodo exacto.
++        //   - Ciclo largo (terminó tarde, pero menos de un periodo): no espera;
++        //     el siguiente ciclo arranca de inmediato y, como también es corto,
++        //     el loop recupera la fase. La frecuencia media sigue en 1000/LOOP_MS.
++        //   - Retraso de un periodo o más (bloqueo excepcional): se re-sincroniza
++        //     la fecha límite con el reloj en vez de encadenar ciclos sin espera
++        //     para "recuperar" muchos periodos de golpe.
++        // La comparación usa la resta con signo, válida a través del desborde de
++        // millis() (cada ~49.7 días).
++        let now = millis();
++        if (now.wrapping_sub(next_deadline) as i32) >= LOOP_MS as i32 {
++            next_deadline = now;                     // re-sincronizar tras un bloqueo largo
++        } else {
++            // Espera activa: las ISR (encoders, USART0_RX, USART2_RX, Timer0) siguen
++            // atendiéndose durante la espera, igual que durante delay_ms.
++            while (millis().wrapping_sub(next_deadline) as i32) < 0 {}
++        }
++        next_deadline = next_deadline.wrapping_add(LOOP_MS);
++
++        // Timestamp relativo para la TLM periódica (campo t=…ms): ahora tiempo real
++        // (antes elapsed_ms += LOOP_MS por ciclo).
++        sensor_frame.tick_ms = millis();
+     }
+ }
+ 
